@@ -5,11 +5,7 @@ the FM-1's firmware with [AMY](https://github.com/shorepine/amy), a portable syn
 playing AMY's emulations of the 128 factory patches of the Roland Juno-60. Pick a patch with
 the PRESETS knob, then shape it with the four knobs: filter, envelope, oscillator mix and LFO.
 
-<!-- Photo: put it at docs/img/fm1-amy.jpg and replace this comment with:
-![fm1-amy on the M-VAVE FM-1](docs/img/fm1-amy.jpg)
--->
-
-![The fm1-amy screen: the VCF page, the ENV page, another patch, and the OSC page](docs/img/amy-screens.png)
+![fm1-amy on an M-VAVE FM-1, showing the ENV page of patch A12 Brass Swell](docs/img/fm1-amy.jpg)
 
 > **fm1-amy is experimental.** It has been built, installed and played on one FM-1. Installing
 > it replaces the FM-1's own firmware and is at your own risk. An FM-1 that keeps crashing at
@@ -23,6 +19,8 @@ loader and installer, the safe mode and the build system) and replaces the instr
 none of X0X's groovebox is used.
 
 ## Playing it
+
+![The fm1-amy screen: the VCF page, the ENV page, another patch, and the OSC page](docs/img/amy-screens.png)
 
 | Control | What it does |
 |---|---|
