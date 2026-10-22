@@ -1,0 +1,21 @@
+# X0X_AMY (build/host/x0x_amy_host): the cost of every AMY voice at once. Six keys held (all of
+# synth 1's voices, X0X_AMY_VOICES) for 3 s, recorded to amy_load.wav; the run ends with the instructions
+# per sample while AMY sounds, to compare with x0x_host on a playing pattern.
+#   build/host/x0x_amy_host host/amy_load.x0x OUTDIR
+wait 300
+wav amy_load.wav
+key w0 down
+key w2 down
+key w4 down
+key w7 down
+key w9 down
+key w11 down
+wait 3000
+key w0 up
+key w2 up
+key w4 up
+key w7 up
+key w9 up
+key w11 up
+wait 2000
+wavstop

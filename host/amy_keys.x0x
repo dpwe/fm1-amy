@@ -1,0 +1,35 @@
+# X0X_AMY (build/host/x0x_amy_host): the keys play the power-on patch (X0X_AMY_PATCH). A scale up the white keys,
+# then a held three-note chord, recorded to amy_keys.wav.
+#   build/host/x0x_amy_host host/amy_keys.x0x OUTDIR
+wait 300
+wav amy_keys.wav
+key w0 down
+wait 200
+key w0 up
+wait 50
+key w1 down
+wait 200
+key w1 up
+wait 50
+key w2 down
+wait 200
+key w2 up
+wait 50
+key w3 down
+wait 200
+key w3 up
+wait 50
+key w4 down
+wait 200
+key w4 up
+wait 50
+key w0 down
+key w2 down
+key w4 down
+wait 1500
+key w0 up
+key w2 up
+key w4 up
+wait 1500
+wavstop
+shot amy_keys.png

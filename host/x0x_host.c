@@ -501,7 +501,11 @@ static void run_ms(uint32_t ms)
 #endif
             di = instr_now() - i0;
             dt = now_ns() - t0;
+#ifdef X0X_AMY
+            if (seq.playing || engine_amy_sounding()) {  /* X0X_AMY: while AMY makes a sound */
+#else
             if (seq.playing) {                           /* the cost that matters: while it plays */
+#endif
                 for (k = 0; k < ENG_PROF_N; k++)
                     prof_tot[k] += (uint32_t)(eng_prof[k] - pr0[k]);
                 ins_total += di;
@@ -1283,7 +1287,12 @@ int main(int argc, char **argv)
         printf("\n");
     }
     if (ins_frames && ins_total)
-        printf("host: playing, %.0f instructions / sample (mean), %.0f in the worst block\n",
+        printf("host: %s, %.0f instructions / sample (mean), %.0f in the worst block\n",
+#ifdef X0X_AMY
+               "AMY sounding",
+#else
+               "playing",
+#endif
                (double)ins_total / (double)ins_frames, (double)ins_block_max / 256.0);
     return fails ? 1 : 0;
 }

@@ -43,6 +43,17 @@ FPU = ["-mcpu=r3", "-mfprev1", "-ffp-contract=off"]
 # the DSP, the sequencer and the audio engine: separate units at -O2
 O2_UNITS = ["dsp/drum909.c", "dsp/drum808.c", "dsp/bass303.c", "dsp/breaks.c", "dsp/fxbus.c", "dsp/master.c",
             "seq/sequencer.c", "seq/tb3po.c", "seq/pattern.c", "seq/motion.c", "app/engine.c"]
+# X0X_AMY=1 (with AMY_DIR): AMY (github.com/shorepine/amy) in place of X0X's engines, ui_amy.c on the
+# screen; AMY's sources are copied to build/amy/src by tools/prep_amy_src.py (Juno patches, no PCM), and
+# the app links the toolchain's newlib (libc, libm) and compiler-rt, which X0X itself does without.
+# Its app and package go to build/amy_fw/, so the X0X build in build/ stays as it is.
+AMY = os.environ.get("X0X_AMY") == "1"
+AMY_SRC = OUT / "amy" / "src"
+AMY_UNITS = ["algorithms", "amy", "envelope", "examples", "parse", "filters", "oscillators", "pcm", "interp_partials",
+             "custom", "delay", "log2_exp2", "patches", "transfer", "sequencer", "instrument", "amy_midi", "api",
+             "midi_mappings", "cv_trigger", "note_output"]
+# newlib's __ieee754_logf adds -0x30a3d0 (0xffcf5c30) to a float's bits: arithmetic, not a ROM address
+AMY_NOT_ROM = {0xFFCF5C30}
 LINE = re.compile(r"^\s*([0-9a-f]+):\s+((?:[0-9a-f]{2} )+)\s*\t(.*)$")
 
 # SDK files of AC79NN_SDK_V1.2.1_2023-12-13 (the tested version)
@@ -143,6 +154,14 @@ def generate():
         raise SystemExit(f"build: {', '.join(failed)} failed")
     # the BREAK part's built-in bank: the 909-rendered loops (no recordings), or, opt-in,
     # one-bar WAVs from X0X_BREAK_BANK (made by tools/import_breaks.py; not in this tree)
+    if AMY:
+        for c in ([tools / "prep_amy_src.py", os.environ["AMY_DIR"], AMY_SRC],
+                  [tools / "gen_amy_juno.py", AMY_SRC / "patches.h", GEN / "amy_juno.h"]):
+            r = subprocess.run([sys.executable, *map(str, c)], capture_output=True, text=True)
+            sys.stdout.write(r.stdout)
+            if r.returncode:
+                sys.stderr.write(r.stderr)
+                raise SystemExit(f"build: {c[0].name} failed")
     bank = os.environ.get("X0X_BREAK_BANK")
     cmd = ([sys.executable, str(tools / "gen_break_bank.py"), bank, str(GEN / "x0x_break_bank.h")] if bank
            else ["sh", str(tools / "gen_builtin_break.sh"), str(GEN)])
@@ -226,6 +245,10 @@ def build_app():
     flags.append(f'-DFELUCCA_ID="{PRODUCT}"')
     if VERSION:
         flags.append(f'-DX0X_VERSION="{VERSION}"')
+    if AMY:
+        inc = "/opt/jieli/pi32v2/include" if use_docker() else str(toolchain() / "pi32v2" / "include")
+        flags += ["-isystem", inc, "-DX0X_AMY", f"-DX0X_AMY_PATCH={os.environ.get('X0X_AMY_PATCH', '0')}",
+                  f"-DX0X_AMY_VOLUME={os.environ.get('X0X_AMY_VOLUME', '2')}"]
     o2 = [f if f != "-Os" else "-O2" for f in flags]
     units = [("cc", "-c", FW / "crt0.S", "-o", OUT / "crt0.o"),
              ("cc", "-c", FW / "hal" / "fm1_vec.S", "-o", OUT / "fm1_vec.o"),
@@ -235,14 +258,31 @@ def build_app():
     objs = [OUT / "crt0.o", OUT / "fm1_vec.o", OUT / "fm1_isr.o", OUT / "fm1_cpu1.o", OUT / "x0x.o"]
     (OUT / "o2").mkdir(parents=True, exist_ok=True)
     for u in O2_UNITS:
+        if AMY and (u.startswith("dsp/") or u == "app/engine.c"):   # engine_amy.c stands in (engine.h)
+            continue
         o = OUT / "o2" / (u.replace("/", "_")[:-2] + ".o")
         units.append(("cc", *o2, "-c", FW / "src" / u, "-o", o))
         objs.append(o)
+    if AMY:
+        amy_o2 = [*o2, "-Ibuild/amy/src", "-DAMY_NO_MINIAUDIO", "-w"]
+        for u in AMY_UNITS:
+            o = OUT / "o2" / f"amy_{u}.o"
+            units.append(("cc", *amy_o2, "-c", AMY_SRC / f"{u}.c", "-o", o))
+            objs.append(o)
+        for f in ("engine_amy", "amy_libc"):    # amy_libc.c: what JieLi's newlib leaves out (device only)
+            o = OUT / "o2" / f"{f}.o"
+            units.append(("cc", *o2, "-Ibuild/amy/src", "-c", FW / "src" / "app" / f"{f}.c", "-o", o))
+            objs.append(o)
     tc_all(*units)
     elf = OUT / "x0x.elf"
+    libs = []
+    if AMY:
+        lib = "/opt/jieli/pi32v2/lib/r3" if use_docker() else str(toolchain() / "pi32v2" / "lib" / "r3")
+        # newlib's memcpy member comes in alongside libc.c's memcpy: the first (X0X's) is kept
+        libs = ["-L" + lib, "--start-group", "-lc", "-lm", "-lcompiler-rt", "--end-group", "--allow-multiple-definition"]
     # unreferenced functions (each in its own section: -ffunction-sections) are dropped: the DSP keeps
     # mono reference paths for the host tests that the firmware no longer calls
-    tc("pi32v2/bin/ld", "--gc-sections", "-e", "_start", "-T", FW / "app.ld", *objs, "-o", elf)
+    tc("pi32v2/bin/ld", "--gc-sections", "-e", "_start", "-T", FW / "app.ld", *objs, *libs, "-o", elf)
     for sect in ("text.bin", "data.bin", "ramtext.bin", "c1text.bin"):
         (OUT / sect).unlink(missing_ok=True)
     *_, syms, dis, rt = tc_all(("common/bin/objcopy", "-O", "binary", "-j", ".text", elf, OUT / "text.bin"),
@@ -292,12 +332,15 @@ def check(img, syms, dis, rt):
             continue
         for v in re.findall(r"= (-?\d+) <|call -?\d+ <[^:>]*: ([0-9a-f]+) >", mm.group(3)):
             val = (int(v[0]) & 0xFFFFFFFF) if v[0] else int(v[1], 16) & 0xFFFFFFFF
-            if 0xFFC00000 <= val < 0xFFD00000:
+            if 0xFFC00000 <= val < 0xFFD00000 and not (AMY and val in AMY_NOT_ROM):
                 errors.append(f"reference to ROM address {val:#010x}")
     if len(img) > APP_SLOT:
         errors.append(f"image {len(img)} B exceeds the app slot")
     # X0X: the FPU is single precision; a soft-double routine in the image means a double crept in
     soft = sorted(set(re.findall(r"\s(__(?:add|sub|mul|div|neg|cmp|eq|ne|lt|le|gt|ge|un|extendsf|truncdf|fixdf|fixunsdf|floatsidf|floatunsidf|floatdidf)\w*df\w*)$", syms, re.M)))
+    if AMY and "__extendsfdf2" in soft:  # AMY's float -> double promotions: diagnostics and per-message code
+        soft.remove("__extendsfdf2")    # (fprintf of a float, EQ's "/ 20.0"), never per sample; arithmetic still fails
+        notes.append("AMY: __extendsfdf2 only (float -> double in AMY's diagnostics and message handling)")
     if soft:
         errors.append(f"soft-double routines linked: {soft[:6]} (a double in the code)")
     else:
@@ -361,7 +404,7 @@ def mmio_check():
 
 
 def main():
-    global PRODUCT, VERSION
+    global PRODUCT, VERSION, OUT
     ap = argparse.ArgumentParser()
     ap.add_argument("--release", metavar="X.Y[.Z]", help="release build: identity FM-1_9XXYYZZ, version string X.Y[.Z]")
     ap.add_argument("--sdk", type=Path, help="JieLi AC79 SDK checkout (default: $AC79_SDK)")
@@ -382,6 +425,11 @@ def main():
     for rel, sha in SDK_SHA256.items():          # fail early without the SDK
         if hashlib.sha256(fm1pkg_make.sdk_file(rel)).hexdigest() != sha:
             print(f"warning: SDK {rel} differs from AC79NN_SDK_V1.2.1; the package will not match the reference")
+    if AMY:
+        if not os.environ.get("AMY_DIR"):
+            raise SystemExit("X0X_AMY=1 needs AMY_DIR (an amy checkout)")
+        OUT = SRC / "build" / "amy_fw"
+        name = name.replace("x0x", "x0x-amy")
     OUT.mkdir(parents=True, exist_ok=True)
     with ThreadPoolExecutor(2) as ex:
         gen, ldr = ex.submit(generate), ex.submit(build_loader)

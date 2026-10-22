@@ -4558,9 +4558,17 @@ static void speak_dump(void)
 }
 #endif
 
+#ifdef X0X_AMY
+#include "ui_amy.c"                  /* X0X_AMY: its own UI in place of this one */
+#endif
+
 void ui_init(void)
 {
     int i;
+#ifdef X0X_AMY
+    amy_ui_init();
+    return;
+#endif
     for (i = 0; i < NKEYS; i++) {
         if (KEY_WHITE[i] >= 0)
             WHITE_KEY[KEY_WHITE[i]] = (uint8_t)i;
@@ -4620,6 +4628,10 @@ static void autosave(void)
 void ui_frame(void)
 {
     uint32_t i;
+#ifdef X0X_AMY
+    amy_ui_frame();
+    return;
+#endif
     input();
     undo_tick();
     autosave();
@@ -4641,7 +4653,11 @@ void ui_frame(void)
     ui.frame++;
 }
 
+#ifdef X0X_AMY
+void ui_input_only(void) {}           /* amy_ui_frame reads the encoders itself */
+#else
 void ui_input_only(void) { input(); }
+#endif
 int ui_dirty(void) { return ui.dirty != 0; }
 void ui_say(const char *a, const char *b) { say(a, b); }
 void ui_warn(const char *a, const char *b) { warn(a, b); }
