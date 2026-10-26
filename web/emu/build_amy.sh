@@ -16,7 +16,7 @@ mkdir -p build/gen "$O"
 [ -f build/gen/x0x_drum_samples.h ] || python3 tools/gen_drum_samples.py build/gen/x0x_drum_samples.h >/dev/null
 python3 tools/gen_words.py firmware/words.tsv web/words build/gen/ann_words.h >/dev/null
 sh tools/gen_builtin_break.sh build/gen >/dev/null
-python3 tools/gen_amy_juno.py "$AMY_DIR/src/patches.h" build/gen/amy_juno.h
+python3 tools/gen_amy_juno.py tools/amy_k257.json build/gen/amy_juno.h
 AMY_SRC="algorithms amy envelope examples parse filters oscillators pcm interp_partials custom delay
          log2_exp2 patches transfer sequencer instrument amy_midi api midi_mappings cv_trigger note_output"
 for f in $AMY_SRC; do

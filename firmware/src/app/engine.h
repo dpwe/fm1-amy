@@ -56,13 +56,13 @@ void engine_render(int32_t *out_lr, uint32_t n);   /* ISR: n stereo frames, 24-b
 #ifdef X0X_AMY
 /* engine_amy.c: AMY in place of the engines. X0X_AMY builds compile it instead of engine.c and the DSP
  * units; it implements this header (engine_render hands each block to AMY) and these: */
-#define X0X_AMY_VOICES 6               /* synth 1's polyphony */
 #ifndef X0X_AMY_PATCH
-#define X0X_AMY_PATCH 0                /* the patch at power-on (AMY's numbering: 0.. Juno, 128.. DX7) */
+#define X0X_AMY_PATCH 0                /* the preset at power-on: 0..127, A11..B88 (ui_amy.c) */
 #endif
 void engine_amy_init(void);
 void engine_amy_render(int32_t *out_lr, uint32_t n, float gain);   /* ISR; gain = master * codec full scale */
 int engine_amy_send(const char *m);    /* main loop: a wire message for the ISR to give AMY; -1 = queue full */
+void engine_amy_preset(const char *base, const char *const *msg, int n);   /* main loop: base, then i1 + msg[] */
 void engine_amy_octave(int o);         /* the keys' octave shift, from the next key down */
 void engine_amy_sysex_byte(uint8_t b); /* usb.c (TIMER5 ISR): each SysEx byte, for the AMYboard editor */
 int engine_amy_sounding(void);         /* the last block was not silent (the host's cost measure) */

@@ -6,7 +6,7 @@
  * messages, and the UI's messages (engine_amy_send, main loop) wait in a queue the ISR empties
  * before the block renders, so the main loop never races the render.
  *
- * The 27 keys play AMY synth 1 (a Juno-60 patch from ui_amy.c, X0X_AMY_PATCH at power-on), and so
+ * The 27 keys play AMY synth 1 (a Juno-60 preset from ui_amy.c, X0X_AMY_PATCH at power-on), and so
  * does USB MIDI on channel 1; the AMYboard editor (amyboard.com/editor, "control" mode) reaches AMY
  * over USB SysEx (see "MIDI" below). */
 #include <stdio.h>
@@ -23,6 +23,18 @@
 #ifndef X0X_AMY_KEYS_OUT
 #define X0X_AMY_KEYS_OUT 0             /* 1: the keys also go out over USB MIDI, channel 1 (off: the
                                         * editor echoes MIDI back to the board, which would double them) */
+#endif
+#ifndef X0X_AMY_LOG
+#define X0X_AMY_LOG 0                  /* 1 (host builds): print every message given to AMY, "amy< ..." */
+#endif
+#if X0X_AMY_LOG
+static void amy_msg(char *m)
+{
+    fprintf(stderr, "amy< %s\n", m);
+    amy_add_message(m);
+}
+#else
+#define amy_msg amy_add_message
 #endif
 /* a ring's writer publishes its data before its index: a compiler barrier (the cores' order is in-order) */
 #define PUBLISH() __atomic_signal_fence(__ATOMIC_SEQ_CST)
@@ -55,6 +67,40 @@ int engine_amy_send(const char *m)
     PUBLISH();
     mq_w = w + 1u;
     return 0;
+}
+
+/* a preset, as the AMYboard editor loads one (ui_amy.c): its base patch message, then its wire
+ * messages for synth 1; the latest request wins, and the ISR applies it before the knob messages
+ * queued after it */
+static const char *const *volatile preset_msg;
+static const char *volatile preset_base;
+static volatile int preset_n;
+
+void engine_amy_preset(const char *base, const char *const *msg, int n)
+{
+    preset_msg = 0;
+    PUBLISH();
+    preset_base = base;
+    preset_n = n;
+    PUBLISH();
+    preset_msg = msg;
+}
+
+static void preset_apply(void)         /* the audio ISR */
+{
+    const char *const *msg = preset_msg;
+    char m[160];
+    int i;
+    if (!msg)
+        return;
+    preset_msg = 0;
+    PUBLISH();
+    snprintf(m, sizeof m, "%s", preset_base);
+    amy_msg(m);
+    for (i = 0; i < preset_n; i++) {   /* each for synth 1, as the editor sends it */
+        snprintf(m, sizeof m, "i1%s", msg[i]);
+        amy_msg(m);
+    }
 }
 
 static volatile int8_t octave;         /* the keys' octave shift (OCT- / OCT+) */
@@ -165,7 +211,7 @@ static void spss_frame(char *m, uint32_t n)   /* the audio ISR: one 00 03 45 fra
     } else if (m[0] == 'z' && m[1] && strchr("PBDFSO", m[1])) {
         /* the AMYboard's own: nothing to do here */
     } else {
-        amy_add_message(m);
+        amy_msg(m);
     }
     spss_reply('A', 'K');
 }
@@ -202,9 +248,7 @@ void engine_amy_init(void)
     c.max_memory_patches = 4;
     c.max_sequencer_tags = 32;
     c.amy_external_midi_output_hook = midi_send;
-    amy_start(c);
-    snprintf(m, sizeof m, "i1iv%dK%d", X0X_AMY_VOICES, X0X_AMY_PATCH);
-    amy_add_message(m);
+    amy_start(c);                      /* (the power-on preset comes from ui_amy.c) */
     snprintf(m, sizeof m, "V%d", X0X_AMY_VOLUME);
     amy_add_message(m);
     keys_was = 0;
@@ -220,7 +264,7 @@ static void keys_to_notes(void)        /* ISR: each key that went down or up sin
             if ((k >> i) & 1u)
                 key_note[i] = (uint8_t)(KEY_NOTE0 + 12 * octave + i);
             snprintf(m, sizeof m, "i1n%dl%d", key_note[i], (int)((k >> i) & 1u));
-            amy_add_message(m);
+            amy_msg(m);
 #if X0X_AMY_KEYS_OUT
             {
                 uint8_t on[3] = {(uint8_t)((k >> i) & 1u ? 0x90 : 0x80), key_note[i], 100};
@@ -244,8 +288,9 @@ void engine_amy_render(int32_t *out_lr, uint32_t n, float gain)
             out_lr[i] = 0;
         return;
     }
+    preset_apply();
     while (mq_r != mq_w) {
-        amy_add_message(mq[mq_r % MQ]);
+        amy_msg(mq[mq_r % MQ]);
         mq_r++;
     }
     midi_in();

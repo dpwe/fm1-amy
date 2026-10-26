@@ -156,7 +156,7 @@ def generate():
     # one-bar WAVs from X0X_BREAK_BANK (made by tools/import_breaks.py; not in this tree)
     if AMY:
         for c in ([tools / "prep_amy_src.py", os.environ["AMY_DIR"], AMY_SRC],
-                  [tools / "gen_amy_juno.py", AMY_SRC / "patches.h", GEN / "amy_juno.h"]):
+                  [tools / "gen_amy_juno.py", tools / "amy_k257.json", GEN / "amy_juno.h"]):
             r = subprocess.run([sys.executable, *map(str, c)], capture_output=True, text=True)
             sys.stdout.write(r.stdout)
             if r.returncode:

@@ -2,9 +2,10 @@
 
 fm1-amy turns the M-VAVE FM-1 into a six-voice polyphonic analog-style synthesizer. It replaces
 the FM-1's firmware with [AMY](https://github.com/shorepine/amy), a portable synthesizer library,
-playing AMY's emulations of the 128 factory patches of the Roland Juno-60. Pick a patch with
-the PRESETS knob, then shape it with the four knobs, which mirror the patch pane of the AMYboard
-editor: oscillators, LFO, filter, envelopes, EQ, chorus, reverb and distortion.
+playing AMY's emulations of the 128 factory patches of the Roland Juno-60, loaded just as the
+[AMYboard editor](https://amyboard.com/editor) loads them. Pick a preset with the PRESETS knob,
+then shape it with the four knobs, which mirror the editor's patch pane: oscillators, LFO,
+filter, envelopes, EQ, chorus, reverb and distortion.
 Over USB it is also a MIDI instrument, and it can be edited from the
 [AMYboard editor](https://amyboard.com/editor).
 
@@ -29,7 +30,7 @@ none of X0X's groovebox is used.
 |---|---|
 | Keys | Play the patch: 27 keys from F3 to G5, up to six notes at once |
 | OCT- / OCT+ | Shift the keys down or up an octave (-2 to +2; shown at the top right of the screen) |
-| PRESETS | Choose the patch, A11 to B88 (all 128 of the Juno-60's factory patches) |
+| PRESETS | Choose the preset, A11 to B88: the Juno-60's 128 factory patches (see [Presets](#presets)) |
 | SELECT | Choose the page of knobs, one of eleven (the screen shows the pages either side) |
 | KNOB1 to KNOB4 | Change the page's settings (shown as K1 to K4 on the screen) |
 | MASTER | Volume |
@@ -56,19 +57,33 @@ wave selector, which the FM-1 leaves out.)
 Turning a continuous knob moves it in 128 steps along its range, logarithmically where the
 editor's knob is logarithmic. The selectors step through their options one detent at a time:
 the oscillators' wave (sine, pulse, saw up, saw down, triangle, noise, PCM, wavetable, algo;
-fm1-amy has no samples or wavetables, and "algo" needs FM operators a Juno voice doesn't have, so
+fm1-amy has no samples or wavetables, and "algo" needs FM operators this voice doesn't have, so
 the last three aren't useful here) and the distortion type (off, clip, fold, clip+fold, crush,
 all).
 
-Choosing a patch puts the knobs of the first eight pages where that patch has them, showing the
-patch's exact values until you turn a knob, so you start from the factory sound and change it
-from there. Reverb and distortion, which no Juno patch sets, keep their settings across patches.
+### Presets
 
-On a Juno patch, OSC A and OSC B are its pulse and saw oscillators (its sub-oscillator and noise,
-which the editor has no knobs for, stay as the patch sets them), and ADSR is its envelope, which
-shapes the filter and, in most patches, the volume. The editor's VCF "env" knob and its VCF ENV
-page drive a second envelope that most Juno patches don't use, so on these patches they add a
-filter sweep of their own rather than changing the patch's.
+The PRESETS knob loads each Juno-60 preset exactly as the editor's **Load Preset** button does,
+so a preset sounds the same on the FM-1 as it does after Load Preset in the editor, and the
+FM-1's knobs show the same values as the editor's. The screen shows the new preset at once; the
+FM-1 loads it once the knob has rested for 150 ms, so scrolling through doesn't load every preset
+on the way.
+
+The editor doesn't load AMY's own Juno patches, which use six oscillators a voice. It loads
+AMYboard's default patch (AMY patch 257: four oscillators a voice, the filter and amplifier, the
+LFO, Osc A and Osc B, which is what its knobs control) and then sends five messages that set it up
+like the Juno patch. In that translation, which approximates the Juno patch:
+
+- OSC A and OSC B are the Juno patch's two loudest sources among its pulse, saw, sub-oscillator
+  and noise (usually the pulse and saw), with the Juno's amplifier level folded into their levels;
+- the Juno's envelope becomes both the ADSR (the volume) and VCF ENV (the filter, by the VCF
+  "env" amount), set the same; in the patches that use the Juno's "gate" mode, it becomes VCF ENV
+  only, and the volume just follows the key;
+- the LFO is a triangle, and EQ and chorus are as the patch sets them.
+
+Choosing a preset puts the knobs of the first eight pages where the preset sets them, showing its
+exact values until you turn a knob, so you start from the factory sound and change it from there.
+Reverb and distortion, which no preset sets, keep their settings across presets.
 
 What it doesn't do (yet):
 
@@ -79,14 +94,17 @@ What it doesn't do (yet):
   MIDI (see [MIDI and the AMYboard editor](#midi-and-the-amyboard-editor)).
 - **No echo.** The ECHO page is shown, to match the editor, but does nothing: the FM-1 doesn't have
   the RAM for echo's delay line beside the reverb's (see [How it works](#how-it-works)).
-- **Only the Juno patches.** AMY also has 128 DX7 patches, but they are left out to fit the
+- **Only the Juno presets.** AMY also has 128 DX7 patches, but they are left out to fit the
   FM-1's flash (see [How it works](#how-it-works)).
 
 ## MIDI and the AMYboard editor
 
 Over USB the FM-1 is a class-compliant MIDI device, "X0X FM-1" (the name comes from X0X); no
 driver is needed. MIDI channel 1 plays the synth, with note velocity, pitch bend and the sustain
-pedal (CC 64), so a keyboard or a DAW can play it.
+pedal (CC 64), so a keyboard or a DAW can play it. Its controllers are AMYboard's, from patch
+257's MIDI mappings: CC 7 level, 74 filter freq, 71 resonance, 76 LFO freq, 77 LFO osc depth,
+93 chorus level, 73 / 75 / 79 / 72 attack / decay / sustain / release, and 91 reverb level
+(CC 94, echo level, does nothing here).
 
 The [AMYboard editor](https://amyboard.com/editor) can edit it live. The editor is made for
 [AMYboard](https://amyboard.com), AMY's own hardware, and talks to it in AMY's wire language over
@@ -182,15 +200,29 @@ Then build:
 X0X_AMY=1 AMY_DIR=~/amy ./build.sh        # build/amy_fw/x0x-amy.fwsc
 ```
 
-`X0X_AMY_PATCH=N` chooses the patch at power-on (0 to 127, default 0 = A11 Brass Set 1).
+`X0X_AMY_PATCH=N` chooses the preset at power-on (0 to 127, default 0 = A11 Brass Set 1).
 The build checks the result as X0X's does and fails if anything is out of bounds:
 
 ```
-  ok    image 324980 B; RAM .data+.bss 80184 B of 98304; pool 332240 B of 344064
+  ok    image 319980 B; RAM .data+.bss 80212 B of 98304; pool 332240 B of 344064
 ```
 
 Without `X0X_AMY=1`, `./build.sh` still builds X0X's groovebox (into `build/`), since this tree
 carries X0X's sources unchanged: the AMY build swaps its engine and screen in at build time.
+
+### Updating the presets
+
+The presets are a committed snapshot, `tools/amy_k257.json`: for each Juno patch, the messages the
+editor's Load Preset sends. It is made by running the editor's own translation
+(`get_wire_commands_for_juno_patch` and the wire-code parser in `tulip/amyboardweb/static/spss.js`
+of [tulipcc](https://github.com/shorepine/tulipcc)), unchanged, under Node, with AMY's generated
+patch list. Building doesn't need Node or tulipcc; when the editor's translation or AMY's Juno
+patches change, check and regenerate the snapshot from a tulipcc checkout:
+
+```bash
+node tools/gen_amy_k257.js ~/tulipcc --check    # is the snapshot current?
+node tools/gen_amy_k257.js ~/tulipcc            # rewrite tools/amy_k257.json
+```
 
 ## Trying it without an FM-1
 
@@ -223,33 +255,34 @@ keyboard (`q` to `i`, `a` to `k`). The page's text still describes X0X.
 
 **AMY in place of X0X's engines.** X0X renders its parts in the FM-1's audio interrupt, 256
 stereo frames at 44.1 kHz at a time. fm1-amy hands that same call to AMY
-(`firmware/src/app/engine_amy.c`), which renders one 256-sample block of synth 1: a Juno patch
-with six voices. Everything that touches AMY runs in that interrupt: the keys are read there and
+(`firmware/src/app/engine_amy.c`), which renders one 256-sample block of synth 1: patch 257,
+set up as a Juno preset, with six voices. Everything that touches AMY runs in that interrupt: the keys are read there and
 become note messages, and the screen's knob changes reach it through a queue, so the main loop
 (the screen, USB) never races the synth. The AMY build leaves out X0X's `engine.c` and its 909,
 808, 303 and break engines; `engine_amy.c` stands in for them.
 
 **The screen** (`firmware/src/app/ui_amy.c`) replaces X0X's. Its knob table is the AMYboard
 editor's (`amy_parameters.js` in tulipcc's `tulip/amyboardweb/static/`): each knob's name, range,
-curve and AMY message template, sent for synth 1. The editor's knobs assume AMYboard's default
-patch, whose first four oscillators are the filter and amplifier, the LFO and two oscillators;
-a Juno voice in AMY starts the same way (then adds sub and noise oscillators), which is why the
-same knobs work on the Juno patches. A message to the synth naming an oscillator changes that
-oscillator in every voice. Each patch's starting values come from a table generated at build time
-from AMY's own patch definitions (`tools/gen_amy_juno.py`).
+curve and AMY message template, sent for synth 1. The editor's knobs control AMYboard's default
+patch, 257, which is what the FM-1 runs too. A message to the synth naming an oscillator changes
+that oscillator in every voice. `tools/gen_amy_juno.py` turns the preset snapshot into a table:
+each preset's name, its messages, and the knob values those messages set. When a preset is
+chosen, the audio interrupt sends AMY the editor's base message (`K257i1iv6`: patch 257 on synth 1
+with six voices) and then each of the preset's messages, as the editor does.
 
 **Fitting the FM-1.** The firmware has 568 KB of flash, 96 KB of RAM for the program's data and
 a 336 KB pool for large buffers.
 
 | | fm1-amy | X0X, for comparison |
 |---|---|---|
-| Firmware image | 325 KB | 480 KB |
+| Firmware image | 320 KB | 480 KB |
 | Program data (RAM) | 80 KB | 98 KB |
 | Pool (fm1-amy: AMY's 256 KB heap, the screen's 69 KB canvas, backup buffers) | 332 KB | 336 KB |
 
-To fit, `tools/prep_amy_src.py` copies AMY's sources into the build tree with only the 128 Juno
-patches (no DX7 patches) and without AMY's built-in drum samples. AMY itself is not modified.
-AMY needs about 120 KB of heap with six Juno voices and chorus, and the reverb adds 138 KB when
+To fit, `tools/prep_amy_src.py` copies AMY's sources into the build tree with only patch 257 (the
+Juno presets come from the snapshot; no DX7 patches) and without AMY's built-in drum samples.
+AMY itself is not modified. AMY needs about 120 KB of heap with six voices and chorus (measured
+with AMY's own six-oscillator Juno voices; patch 257's four need less), and the reverb adds 138 KB when
 its level is first raised (measured on a Mac; the delay lines are the same size on the FM-1).
 Echo would add another 98 KB (for delays up to 185 ms) to 295 KB (AMY's default 743 ms maximum),
 which doesn't fit beside the reverb, so fm1-amy builds AMY without echo. If the reverb's own
@@ -263,9 +296,9 @@ fails if any double-precision arithmetic is linked; the fm1-amy build allows onl
 double conversions, which happen in diagnostics and when a patch loads, never per sample.
 
 **CPU.** Measured in the simulator (instructions per sample on a Mac: a comparison, not an FM-1
-figure), six Juno voices take about 980, against about 1,150 for X0X playing its demo pattern,
+figure), six held voices take about 940, against about 1,150 for X0X playing its demo pattern,
 which X0X splits across the FM-1's two cores; fm1-amy renders on one. The reverb adds about a
-fifth (the worst block of six held voices goes from 1,117 to 1,361). The load on the FM-1
+fifth (the worst block of six held voices goes from 1,065 to 1,266). The load on the FM-1
 itself hasn't been measured yet.
 
 ## Next steps
@@ -273,7 +306,7 @@ itself hasn't been measured yet.
 - Save edited patches, and recall them.
 - Show changes that arrive over MIDI on the screen, and send the knobs out as MIDI.
 - Show the audio load, and use the FM-1's second core.
-- Bring back the DX7 patches, if they can be made to fit.
+- Bring back the DX7 patches, loaded as the editor loads them, if they can be made to fit.
 - In AMY: build options for leaving out patch banks and samples, and single-precision constants
   throughout, so neither the trimming step nor the build-check exception is needed.
 
@@ -281,6 +314,9 @@ itself hasn't been measured yet.
 
 - [AMY](https://github.com/shorepine/amy), the synthesizer, by Brian Whitman and Dan Ellis
   (shorepine), including its emulation of the Juno-60 and its factory patches.
+- The [AMYboard editor](https://amyboard.com/editor), in
+  [tulipcc](https://github.com/shorepine/tulipcc) (shorepine, MIT): fm1-amy's knobs are its patch
+  knobs, and its presets are made by its Juno preset translation.
 - [X0X](https://github.com/charlesvestal/fm1-x0x) by Charles Vestal, which fm1-amy is built on:
   its hardware support, simulator, browser emulator, installer and build checks are all here.
 - [Felucca](https://github.com/hugelton/Felucca) by Leo Kuroshita (Hügelton Instruments), the

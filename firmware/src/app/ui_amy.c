@@ -1,6 +1,12 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
-/* X0X_AMY's UI (included by ui.c, which hands it ui_init / ui_frame): AMY's 128 Juno-60 patches
- * on the keys, and the AMYboard editor's patch knobs (amyboard.com/editor) on the FM-1's knobs.
+/* X0X_AMY's UI (included by ui.c, which hands it ui_init / ui_frame): the 128 Juno-60 presets on the
+ * keys, and the AMYboard editor's patch knobs (amyboard.com/editor) on the FM-1's knobs.
+ *
+ * A preset loads as the editor's Load Preset loads it: AMY patch 257 (AMYboard's default, 4 oscs a
+ * voice), then the editor's wire messages that set it up like the Juno patch (amy_juno.h, from
+ * tools/amy_k257.json; tools/gen_amy_k257.js runs the editor's own translation). Turning PRESET
+ * shows the preset at once and loads it when the knob has rested PRESET_REST_MS, so scrolling
+ * through doesn't load every one on the way.
  *
  *   PRESET   the patch (A11 .. B88)         SELECT   the page: OSC A, OSC B, LFO, VCF, VCF ENV,
  *   K1..K4   the page's knobs                        ADSR, EQ, CHORUS, REVERB, ECHO, DISTORTION
@@ -8,13 +14,13 @@
  *
  * The pages, their knobs, ranges, curves and the AMY messages they send are the editor's
  * (amy_parameters.js), so a knob here does what the same knob there does; the editor's LFO "wave"
- * selector is left out. Its channel is synth 1 here (%i), and its CTL / LFO / Osc A / Osc B oscs
- * (0 / 1 / 2 / 3) are a Juno voice's VCF+VCA, LFO, pulse and saw. A continuous knob is 0..127 steps
+ * selector is left out. Its channel is synth 1 here (%i), its oscs those of patch 257: 0 the filter
+ * and VCA, 1 the LFO, 2 Osc A, 3 Osc B. A continuous knob is 0..127 steps
  * along its range (the editor's log curve where it has one); a selector steps through its options.
  * A knob keeps its exact value (a patch's 180 Hz stays 180 Hz) until it is turned, when it moves to
  * the step one detent from the nearest one.
- * Choosing a patch puts the knobs where that patch has them (build/gen/amy_juno.h,
- * tools/gen_amy_juno.py); the bus effects no Juno patch sets (reverb, echo, distortion) keep theirs.
+ * Choosing a preset puts the knobs where its messages set them (build/gen/amy_juno.h,
+ * tools/gen_amy_juno.py); the bus effects no preset sets (reverb, echo, distortion) keep theirs.
  * Echo is shown but does nothing: its delay line doesn't fit beside the reverb in the FM-1's RAM.
  * Nothing is saved: power-on is X0X_AMY_PATCH with its own values. */
 #include <stddef.h>
@@ -102,9 +108,11 @@ static const page_t PG[] = {
 };
 #define PG_N ((int)(sizeof PG / sizeof PG[0]))
 #define PG_ECHO 9                      /* shown, not played (see the top) */
+#define PRESET_REST_MS 150u
 
 static struct {
-    int patch, page, octave;
+    int patch, page, octave, load;     /* load: the preset still to load (PRESET is turning) */
+    uint32_t load_t;                   /* when PRESET last turned */
     float val[KN_N];                   /* a continuous knob's value, a selector's option */
     uint32_t btn_was;
     uint8_t dirty;                     /* redraw: 1 header, 2 page names, 4 knobs */
@@ -191,13 +199,12 @@ static void kn_send(int k)             /* knob k's value to AMY: its change_code
     engine_amy_send(m);
 }
 
-static void amy_patch(int n)
+static void amy_patch(int n)           /* show preset n: it loads when PRESET has rested (amy_ui_frame) */
 {
-    char m[24];
     int p, k;
     am.patch = (n % AMY_NJUNO + AMY_NJUNO) % AMY_NJUNO;
-    sprintf(m, "i1iv%dK%d", X0X_AMY_VOICES, am.patch);
-    engine_amy_send(m);
+    am.load = 1;
+    am.load_t = plat_ms();
     for (p = 0; p < PG_N; p++)
         for (k = PG[p].first; PG[p].patch && k < PG[p].first + PG[p].n; k++)
             am.val[k] = KN[k].type == KT_SEL ? (float)kn_pos(k, AMY_JUNO[am.patch].v[k]) : AMY_JUNO[am.patch].v[k];
@@ -265,7 +272,9 @@ static void amy_ui_init(void)
     am.btn_was = 0;
     for (k = 0; k < KN_N; k++)         /* every knob, the bus effects too, at AMY's power-on value */
         am.val[k] = KN[k].type == KT_SEL ? (float)kn_pos(k, AMY_JUNO[X0X_AMY_PATCH].v[k]) : AMY_JUNO[X0X_AMY_PATCH].v[k];
-    amy_patch(X0X_AMY_PATCH);          /* (engine_amy_init loaded it too: this sets the knobs) */
+    amy_patch(X0X_AMY_PATCH);
+    am.load = 0;                       /* power-on: now, not after a rest */
+    engine_amy_preset(AMY_JUNO_BASE, AMY_JUNO[am.patch].msg, AMY_JUNO_NMSG);
     am.dirty = 7u;
 }
 
@@ -279,6 +288,10 @@ static void amy_ui_frame(void)
     am.btn_was = btn;
     if ((d = plat_enc(EN_PRESET)) != 0)
         amy_patch(am.patch + (int)d);
+    if (am.load && plat_ms() - am.load_t >= PRESET_REST_MS) {
+        am.load = 0;
+        engine_amy_preset(AMY_JUNO_BASE, AMY_JUNO[am.patch].msg, AMY_JUNO_NMSG);
+    }
     if ((d = plat_enc(EN_SELECT)) != 0) {
         am.page = ((am.page + (int)d) % PG_N + PG_N) % PG_N;
         am.dirty |= 2u | 4u;

@@ -20,7 +20,7 @@ recipients its complete corresponding source under the same licence.
 | The second core's start-up and job hand-off (`firmware/hal/fm1_cpu1.*`) | X0X, after what [Melodee](https://github.com/keremimo/melodee) (keremimo)'s dual-core audio found, with [Jangada](https://github.com/zednaked/jangada) (zednaked)'s measurements and mailbox layout | GPL-3.0-only |
 | The idea of a browser emulator for FM-1 firmware (`web/emu/`) | [Groove OS](https://www.groove-os.com/) by Peter Gombos, whose site runs its firmware in the browser; no code from it | credit only |
 | Everything else in `firmware/src/{app,dsp,seq}`, `host/`, `tests/` | X0X | GPL-3.0-only |
-| fm1-amy: `firmware/src/app/{engine_amy,ui_amy,amy_libc}.c`, `tools/{prep_amy_src,gen_amy_juno}.py`, `host/build_host_amy.sh`, `host/amy_*.x0x`, `web/emu/build_amy.sh`, and the `X0X_AMY` parts of `tools/build.py` | fm1-amy (Dan Ellis), on X0X | GPL-3.0-only |
+| fm1-amy: `firmware/src/app/{engine_amy,ui_amy,amy_libc}.c`, `tools/{prep_amy_src,gen_amy_juno}.py`, `tools/gen_amy_k257.js`, `host/build_host_amy.sh`, `host/amy_*.x0x`, `web/emu/build_amy.sh`, and the `X0X_AMY` parts of `tools/build.py` | fm1-amy (Dan Ellis), on X0X | GPL-3.0-only |
 
 No recorded breaks are in this tree or in the default firmware: the built-in break loops are
 generated at build time by X0X's own 909 code. `tools/import_breaks.py`,
@@ -40,6 +40,7 @@ permission concerns those assets only, so it is not needed here.
 | Barlow Semi Condensed (The Barlow Project Authors), the default UI face | SIL OFL 1.1 | `assets/fonts/BarlowSemiCondensed-*.ttf`, `assets/fonts/Barlow-OFL.txt` |
 | Terminus (Dimitar Toshkov Zhekov), the `terminus` font set | SIL OFL 1.1 | `assets/fonts/ter-u*.bdf`, `assets/fonts/Terminus-LICENSE.txt` |
 | Fukiai icon font (Hügelton Instruments), web pages only | MIT | `web/fukiai.ttf`, `web/FUKIAI-LICENSE.txt` |
+| `tools/amy_k257.json`: the Juno presets as the AMYboard editor loads them, the output of the editor's translation (`spss.js` in [tulipcc](https://github.com/shorepine/tulipcc)), run by `tools/gen_amy_k257.js`; fm1-amy's knob table follows the editor's `amy_parameters.js` | MIT | <https://github.com/shorepine/tulipcc> |
 | [AMY](https://github.com/shorepine/amy) (Brian Whitman and Dan Ellis), compiled into the fm1-amy firmware from an AMY checkout (`AMY_DIR`), with its Juno-60 patch emulations; not in this tree | MIT | <https://github.com/shorepine/amy> |
 | JieLi AC79 SDK: `uboot.boot`, `cfg_tool.bin`, `eq_cfg_hw.bin` are read from your SDK checkout at build time and placed in the package; no SDK files are in this tree | Apache-2.0 | <https://gitee.com/Jieli-Tech/fw-AC79_AIoT_SDK> |
 
