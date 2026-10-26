@@ -24,6 +24,13 @@ shot page09.png
 turn SELECT 1
 shot page10.png
 turn SELECT 1
+# the buttons pick pages too: PLAY/STOP is DISTORTION, FX is OSC A (lit: the page shown)
+tap PLAY
+shot button_play.png
+leds
+tap FX
+shot button_fx.png
+leds
 # page 0 (OSC A) again: the patch as stored
 wav base.wav
 key w0 down

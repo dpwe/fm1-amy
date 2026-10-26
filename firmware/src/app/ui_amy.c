@@ -10,7 +10,11 @@
  *
  *   PRESET   the patch (A11 .. B88)         SELECT   the page: OSC A, OSC B, LFO, VCF, VCF ENV,
  *   K1..K4   the page's knobs                        ADSR, EQ, CHORUS, REVERB, ECHO, DISTORTION
- *   OCT- / OCT+   the keys' octave (-2 .. +2)
+ *   OCT- / OCT+   the keys' octave (-2 .. +2)       or a button, in that order: FX .. PLAY/STOP
+ *                                                    (lit: the page shown; REC does nothing)
+ *
+ * Each page's knobs sit on its section's colour in the editor (amy_sections' bg_color, 75 % over
+ * the editor's white page), in dark ink; its name is on a black bar, as the editor's headers are.
  *
  * The pages, their knobs, ranges, curves and the AMY messages they send are the editor's
  * (amy_parameters.js), so a knob here does what the same knob there does; the editor's LFO "wave"
@@ -100,13 +104,29 @@ _Static_assert(sizeof KN / sizeof KN[0] == AMY_JUNO_NV, "tools/gen_amy_juno.py w
 typedef struct {
     const char *name;
     uint8_t first, n, patch;           /* patch: a patch change sets these knobs */
+    uint16_t bg;                       /* the editor's section colour over white */
 } page_t;
-static const page_t PG[] = {
-    {"OSC A", 0, 4, 1}, {"OSC B", 4, 4, 1}, {"LFO", 8, 4, 1}, {"VCF", 12, 4, 1}, {"VCF ENV", 16, 4, 1},
-    {"ADSR", 20, 4, 1}, {"EQ", 24, 3, 1}, {"CHORUS", 27, 3, 1}, {"REVERB", 30, 3, 0}, {"ECHO", 33, 3, 0},
-    {"DISTORTION", 36, 3, 0},
+/* amy_sections' rgba(r, g, b, 0.75) as the browser shows it on white: 0.75 c + 64 */
+#define ED(r, g, b) RGB((r) * 3 / 4 + 64, (g) * 3 / 4 + 64, (b) * 3 / 4 + 64)
+static const page_t PG[] = {           /* SELECT's order, and the buttons' (FX .. PLAY/STOP) */
+    {"OSC A", 0, 4, 1, ED(240, 180, 180)}, {"OSC B", 4, 4, 1, ED(240, 180, 180)},
+    {"LFO", 8, 4, 1, ED(240, 200, 180)},   {"VCF", 12, 4, 1, ED(150, 190, 240)},
+    {"VCF ENV", 16, 4, 1, ED(150, 190, 240)}, {"ADSR", 20, 4, 1, ED(150, 220, 240)},
+    {"EQ", 24, 3, 1, ED(150, 190, 240)},   {"CHORUS", 27, 3, 1, ED(180, 225, 225)},
+    {"REVERB", 30, 3, 0, ED(160, 200, 200)}, {"ECHO", 33, 3, 0, ED(176, 208, 232)},
+    {"DISTORTION", 36, 3, 0, ED(232, 184, 160)},
 };
+/* ink on the pale pages; a bar's track is its page colour darkened */
+#define INK_VAL RGB(24, 24, 28)
+#define INK_LBL RGB(64, 64, 72)
+#define INK_DIM RGB(120, 120, 128)
+#define INK_OFF RGB(150, 40, 30)
+static uint16_t shade(uint16_t c)      /* 70 % of an RGB565 colour */
+{
+    return (uint16_t)((((c >> 11) * 7 / 10) << 11) | ((((c >> 5) & 63u) * 7 / 10) << 5) | ((c & 31u) * 7 / 10));
+}
 #define PG_N ((int)(sizeof PG / sizeof PG[0]))
+_Static_assert(sizeof PG / sizeof PG[0] == B_PLAY - B_FX + 1, "a button for each page: FX .. PLAY/STOP");
 #define PG_ECHO 9                      /* shown, not played (see the top) */
 #define PRESET_REST_MS 150u
 
@@ -243,20 +263,20 @@ static void amy_draw(void)
         cv_blit(0, 72);
     }
     if (am.dirty & 4u) {
-        cv_begin(240, 144, C_BLACK);
+        cv_begin(240, 144, pg->bg);
         for (k = 0; k < pg->n; k++) {
             int i = pg->first + k, y = 36 * k + 4;
             const knob_t *c = &KN[i];
             sprintf(b, "K%d", k + 1);
-            cv_text(8, y + 1, &FONT_T, b, C_DIM);
-            cv_text(30, y, &FONT_XS, c->name, off ? C_DIM : C_GRAY);
-            text_r(232, y, &FONT_S, c->type == KT_SEL ? c->opt[(int)am.val[i]] : fmt3(b, am.val[i]), off ? C_DIM : C_HI);
-            cv_rect(30, y + 20, 202, 5, C_LINE);
+            cv_text(8, y + 1, &FONT_T, b, INK_DIM);
+            cv_text(30, y, &FONT_XS, c->name, off ? INK_DIM : INK_LBL);
+            text_r(232, y, &FONT_S, c->type == KT_SEL ? c->opt[(int)am.val[i]] : fmt3(b, am.val[i]), off ? INK_DIM : INK_VAL);
+            cv_rect(30, y + 20, 202, 5, shade(pg->bg));
             cv_rect(30, y + 20, c->type == KT_SEL ? 202 * (int)am.val[i] / (c->nopt - 1) : 202 * kn_pos(i, am.val[i]) / 127, 5,
-                    off ? C_DIM : C_HI);
+                    off ? INK_DIM : INK_VAL);
         }
         if (off)
-            text_c(120, 36 * 3 + 12, &FONT_XS, "NOT ON THE FM-1 (NO ROOM)", C_AMB);
+            text_c(120, 36 * 3 + 12, &FONT_XS, "NOT ON THE FM-1 (NO ROOM)", INK_OFF);
         cv_blit(0, 96);
     }
     am.dirty = 0;
@@ -296,6 +316,12 @@ static void amy_ui_frame(void)
         am.page = ((am.page + (int)d) % PG_N + PG_N) % PG_N;
         am.dirty |= 2u | 4u;
     }
+    for (k = 0; k < PG_N; k++)         /* B_FX .. B_PLAY are pages 0 .. 10, in the panel's order */
+        if (down & (1u << (B_FX + k))) {
+            am.page = k;
+            am.dirty |= 2u | 4u;
+            break;
+        }
     pg = &PG[am.page];
     for (k = 0; k < 4; k++)
         if ((d = plat_enc(KNOB[k])) != 0 && k < pg->n && am.page != PG_ECHO) {
@@ -318,5 +344,6 @@ static void amy_ui_frame(void)
     }
     if (am.dirty)
         amy_draw();
-    plat_leds((am.octave < 0 ? 1u << B_OCTDN : 0u) | (am.octave > 0 ? 1u << B_OCTUP : 0u), plat_keys());
+    plat_leds((1u << (B_FX + am.page)) | (am.octave < 0 ? 1u << B_OCTDN : 0u) | (am.octave > 0 ? 1u << B_OCTUP : 0u),
+              plat_keys());
 }

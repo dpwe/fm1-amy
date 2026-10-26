@@ -32,13 +32,16 @@ none of X0X's groovebox is used.
 | OCT- / OCT+ | Shift the keys down or up an octave (-2 to +2; shown at the top right of the screen) |
 | PRESETS | Choose the preset, A11 to B88: the Juno-60's 128 factory patches (see [Presets](#presets)) |
 | SELECT | Choose the page of knobs, one of eleven (the screen shows the pages either side) |
+| FX to PLAY/STOP | Jump straight to a page, in the panel's order: FX OSC A, SEL OSC B, ENV LFO, LFO VCF, EDIT VCF ENV, GLO ADSR, HOME EQ, SAVE CHORUS, ARP REVERB, SEQ ECHO, PLAY/STOP DISTORTION. The page's button is lit; REC does nothing |
 | KNOB1 to KNOB4 | Change the page's settings (shown as K1 to K4 on the screen) |
 | MASTER | Volume |
 
 The pages are the sections of the [AMYboard editor](https://amyboard.com/editor)'s patch pane,
 and each knob is the editor's: the same name, range and curve, sending the same AMY message, so a
 knob on the FM-1 does exactly what the same knob in the editor does. (The editor's LFO also has a
-wave selector, which the FM-1 leaves out.)
+wave selector, which the FM-1 leaves out.) Each page shows its knobs on that section's colour
+in the editor (salmon for the oscillators, sky blue for the filter, tan for distortion and so on),
+under a black bar with the page's name, as the editor draws its sections.
 
 | Page | K1 | K2 | K3 | K4 |
 |---|---|---|---|---|
