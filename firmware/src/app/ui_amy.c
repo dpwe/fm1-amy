@@ -1,15 +1,22 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
 /* X0X_AMY's UI (included by ui.c, which hands it ui_init / ui_frame): AMY's 128 Juno-60 patches
- * on the keys, and the patch's sound on the knobs.
+ * on the keys, and the AMYboard editor's patch knobs (amyboard.com/editor) on the FM-1's knobs.
  *
- *   PRESET   the patch (A11 .. B88)        SELECT   the page: VCF, ENV, OSC, LFO
- *   K1..K4   the page's four parameters    OCT- / OCT+   the keys' octave (-2 .. +2)
+ *   PRESET   the patch (A11 .. B88)         SELECT   the page: OSC A, OSC B, LFO, VCF, VCF ENV,
+ *   K1..K4   the page's knobs                        ADSR, EQ, CHORUS, REVERB, ECHO, DISTORTION
+ *   OCT- / OCT+   the keys' octave (-2 .. +2)
  *
- * A knob is 0..127 steps along its parameter's range (log for frequencies and times); choosing a
- * patch puts every knob where that patch has it (build/gen/amy_juno.h, tools/gen_amy_juno.py).
- * Each change goes to AMY as a wire message for synth 1 (engine_amy_send): a synth message naming
- * an osc reaches that osc in every voice. A Juno voice: osc 0 VCF / VCA, 1 LFO, 2 pulse, 3 saw,
- * 4 sub, 5 noise. Nothing is saved: power-on is X0X_AMY_PATCH with its own values. */
+ * The pages, their knobs, ranges, curves and the AMY messages they send are the editor's
+ * (amy_parameters.js), so a knob here does what the same knob there does; the editor's LFO "wave"
+ * selector is left out. Its channel is synth 1 here (%i), and its CTL / LFO / Osc A / Osc B oscs
+ * (0 / 1 / 2 / 3) are a Juno voice's VCF+VCA, LFO, pulse and saw. A continuous knob is 0..127 steps
+ * along its range (the editor's log curve where it has one); a selector steps through its options.
+ * A knob keeps its exact value (a patch's 180 Hz stays 180 Hz) until it is turned, when it moves to
+ * the step one detent from the nearest one.
+ * Choosing a patch puts the knobs where that patch has them (build/gen/amy_juno.h,
+ * tools/gen_amy_juno.py); the bus effects no Juno patch sets (reverb, echo, distortion) keep theirs.
+ * Echo is shown but does nothing: its delay line doesn't fit beside the reverb in the FM-1's RAM.
+ * Nothing is saved: power-on is X0X_AMY_PATCH with its own values. */
 #include <stddef.h>
 #include <stdio.h>
 #ifdef X0X_HOST
@@ -20,58 +27,114 @@ char *strchr(const char *s, int c);     /* newlib; its string.h clashes with lib
 #include <math.h>
 #include "amy_juno.h"
 
-enum { JP_CUTOFF, JP_RESO, JP_ENV, JP_LFO_VCF, JP_ATTACK, JP_DECAY, JP_SUSTAIN, JP_RELEASE,
-       JP_PULSE, JP_SAW, JP_SUB, JP_NOISE, JP_LFO_RATE, JP_LFO_PITCH, JP_PW, JP_CHORUS, JP_N };
-enum { CV_LIN, CV_LOG, CV_LOG0 };      /* LOG0: step 0 is 0, steps 1..127 logarithmic from lo */
-enum { U_HZ, U_MS, U_PCT, U_NUM, U_SIGNED };
+enum { KT_LIN, KT_LOG, KT_SEL };
 typedef struct {
     const char *name;
-    uint8_t curve, unit;
-    float lo, hi;
-} jparam_t;
-static const jparam_t JP[JP_N] = {
-    {"CUTOFF", CV_LOG, U_HZ, 20.0f, 20000.0f},     {"RESONANCE", CV_LOG, U_NUM, 0.5f, 16.0f},
-    {"ENV AMOUNT", CV_LIN, U_SIGNED, -12.0f, 12.0f}, {"LFO AMOUNT", CV_LIN, U_NUM, 0.0f, 2.0f},
-    {"ATTACK", CV_LOG0, U_MS, 1.0f, 5000.0f},      {"DECAY", CV_LOG0, U_MS, 1.0f, 150000.0f},
-    {"SUSTAIN", CV_LIN, U_PCT, 0.0f, 1.0f},        {"RELEASE", CV_LOG0, U_MS, 1.0f, 30000.0f},
-    {"PULSE", CV_LIN, U_PCT, 0.0f, 1.0f},          {"SAW", CV_LIN, U_PCT, 0.0f, 1.0f},
-    {"SUB", CV_LIN, U_PCT, 0.0f, 1.0f},            {"NOISE", CV_LIN, U_PCT, 0.0f, 1.0f},
-    {"LFO RATE", CV_LOG, U_HZ, 0.1f, 30.0f},       {"LFO PITCH", CV_LIN, U_PCT, 0.0f, 0.05f},
-    {"PULSE WIDTH", CV_LIN, U_PCT, 0.5f, 0.95f},   {"CHORUS", CV_LIN, U_PCT, 0.0f, 1.0f},
+    uint8_t type;
+    float lo, hi, off;                 /* range; log knobs: (lo+off) * ((hi+off)/(lo+off))^t - off */
+    const char *code;                  /* the editor's change_code: %i the synth, %v the value */
+    uint8_t nopt;                      /* KT_SEL: its options' names, and their %v (values or codes) */
+    const char *const *opt;
+    const char *const *optv;
+} knob_t;
+
+static const char *const WAVE[] = {"SINE", "PULSE", "SAW UP", "SAW DOWN", "TRIANGLE", "NOISE", "PCM", "WAVETABLE", "ALGO"};
+static const char *const WAVE_V[] = {"0", "1", "3", "2", "4", "5", "7", "19", "8"};
+static const uint8_t WAVE_NUM[] = {0, 1, 3, 2, 4, 5, 7, 19, 8};   /* WAVE_V as numbers */
+static const char *const DIST[] = {"OFF", "CLIP", "FOLD", "CLIP+FOLD", "CRUSH", "ALL"};
+static const char *const DIST_V[] = {"GC0GF0GH0,0", "GC1GF0GH0,0", "GC0GF1GH0,0", "GC1GF1GH0,0", "GC0GF0GH6,5", "GC1GF1GH6,5"};
+#define SEL(o, v) (uint8_t)(sizeof o / sizeof o[0]), o, v
+#define NOSEL 0, 0, 0                  /* a continuous knob: no options */
+
+/* in amy_juno.h's order (tools/gen_amy_juno.py NAMES) */
+static const knob_t KN[] = {
+    {"FREQ", KT_LOG, 50, 2000, 0, "i%iv2f%v", NOSEL},                 /* OSC A */
+    {"WAVE", KT_SEL, 0, 0, 0, "i%iv2w%v", SEL(WAVE, WAVE_V)},
+    {"DUTY", KT_LIN, 0.5f, 0.99f, 0, "i%iv2d%v", NOSEL},
+    {"LEVEL", KT_LOG, 0.001f, 1, 0.1f, "i%iv2a%v", NOSEL},
+    {"FREQ", KT_LOG, 50, 2000, 0, "i%iv3f%v", NOSEL},                 /* OSC B */
+    {"WAVE", KT_SEL, 0, 0, 0, "i%iv3w%v", SEL(WAVE, WAVE_V)},
+    {"DUTY", KT_LIN, 0.5f, 0.99f, 0, "i%iv3d%v", NOSEL},
+    {"LEVEL", KT_LOG, 0.001f, 1, 0.1f, "i%iv3a%v", NOSEL},
+    {"FREQ", KT_LOG, 0.1f, 20, 0, "i%iv1f%v", NOSEL},                 /* LFO */
+    {"OSC", KT_LOG, 0, 4, 0.001f, "i%iv2f,,,,,%vZi%iv3f,,,,,%v", NOSEL},
+    {"PWM", KT_LIN, 0, 0.49f, 0, "i%iv2d,,,,,%vZi%iv3d,,,,,%v", NOSEL},
+    {"FILT", KT_LOG, 0, 4, 0.001f, "i%iv0F,,,,,%v", NOSEL},
+    {"FREQ", KT_LOG, 20, 8000, 0, "i%iv0F%v", NOSEL},                 /* VCF */
+    {"RESONANCE", KT_LOG, 0.5f, 16, 0, "i%iv0R%v", NOSEL},
+    {"KBD", KT_LIN, 0, 1, 0, "i%iv0F,%v", NOSEL},
+    {"ENV", KT_LIN, -10, 10, 0, "i%iv0F,,,,%v", NOSEL},
+    {"ATTACK", KT_LIN, 0, 1000, 0, "i%iv0B%v,1,,,,0", NOSEL},         /* VCF ENV */
+    {"DECAY", KT_LOG, 0, 2000, 50, "i%iv0B,1,%v,,,0", NOSEL},
+    {"SUSTAIN", KT_LIN, 0, 1, 0, "i%iv0B,1,,%v,,0", NOSEL},
+    {"RELEASE", KT_LOG, 0, 8000, 50, "i%iv0B,1,,,%v,0", NOSEL},
+    {"ATTACK", KT_LIN, 0, 1000, 0, "i%iv0A%v,1,,,,0", NOSEL},         /* ADSR */
+    {"DECAY", KT_LOG, 0, 2000, 50, "i%iv0A,1,%v,,,0", NOSEL},
+    {"SUSTAIN", KT_LIN, 0, 1, 0, "i%iv0A,1,,%v,,0", NOSEL},
+    {"RELEASE", KT_LOG, 0, 8000, 50, "i%iv0A,1,,,%v,0", NOSEL},
+    {"LOW", KT_LIN, -15, 15, 0, "i%ix%v", NOSEL},                     /* EQ */
+    {"MID", KT_LIN, -15, 15, 0, "i%ix,%v", NOSEL},
+    {"HIGH", KT_LIN, -15, 15, 0, "i%ix,,%v", NOSEL},
+    {"LEVEL", KT_LOG, 0, 1, 0.1f, "i%ik%v", NOSEL},                   /* CHORUS */
+    {"FREQ", KT_LOG, 0.1f, 20, 0, "i%ik,,%v", NOSEL},
+    {"DEPTH", KT_LIN, 0.01f, 1, 0, "i%ik,,,%v", NOSEL},
+    {"LEVEL", KT_LOG, 0, 1, 0.1f, "i%ih%v", NOSEL},                   /* REVERB */
+    {"LIVE", KT_LIN, 0, 1, 0, "i%ih,%v", NOSEL},
+    {"DAMP", KT_LIN, 0, 1, 0, "i%ih,,%v", NOSEL},
+    {"LEVEL", KT_LIN, 0, 2, 0, "i%iM%v", NOSEL},                      /* ECHO */
+    {"DELAY", KT_LIN, 0, 5000, 0, "i%iM,%v", NOSEL},
+    {"FEEDBACK", KT_LIN, 0, 1, 0, "i%iM,,,%v", NOSEL},
+    {"TYPE", KT_SEL, 0, 0, 0, "i%i%v", SEL(DIST, DIST_V)},    /* DISTORTION */
+    {"DRIVE", KT_LOG, 0.0625f, 16, 0, "i%iGD%v", NOSEL},
+    {"MIX", KT_LIN, 0, 1, 0, "i%iGM%v", NOSEL},
 };
-#define AMY_NPAGES 4
-static const char *const AMY_PAGE[AMY_NPAGES] = {"VCF", "ENV", "OSC", "LFO"};
-_Static_assert(AMY_JUNO_NV == JP_N, "tools/gen_amy_juno.py writes one value per JP_*");
+#define KN_N ((int)(sizeof KN / sizeof KN[0]))
+_Static_assert(sizeof KN / sizeof KN[0] == AMY_JUNO_NV, "tools/gen_amy_juno.py writes one value per knob");
+
+typedef struct {
+    const char *name;
+    uint8_t first, n, patch;           /* patch: a patch change sets these knobs */
+} page_t;
+static const page_t PG[] = {
+    {"OSC A", 0, 4, 1}, {"OSC B", 4, 4, 1}, {"LFO", 8, 4, 1}, {"VCF", 12, 4, 1}, {"VCF ENV", 16, 4, 1},
+    {"ADSR", 20, 4, 1}, {"EQ", 24, 3, 1}, {"CHORUS", 27, 3, 1}, {"REVERB", 30, 3, 0}, {"ECHO", 33, 3, 0},
+    {"DISTORTION", 36, 3, 0},
+};
+#define PG_N ((int)(sizeof PG / sizeof PG[0]))
+#define PG_ECHO 9                      /* shown, not played (see the top) */
 
 static struct {
     int patch, page, octave;
-    uint8_t pos[JP_N];                 /* each knob, 0..127 */
+    float val[KN_N];                   /* a continuous knob's value, a selector's option */
     uint32_t btn_was;
-    uint8_t dirty;                     /* redraw: 1 header, 2 tabs, 4 knobs */
+    uint8_t dirty;                     /* redraw: 1 header, 2 page names, 4 knobs */
 } am;
 
-static float jp_value(int p)
+static float kn_step(int k, int step) /* a continuous knob's value at step 0..127 */
 {
-    const jparam_t *j = &JP[p];
-    float t = (float)am.pos[p] / 127.0f;
-    if (j->curve == CV_LIN)
-        return j->lo + (j->hi - j->lo) * t;
-    if (j->curve == CV_LOG)
-        return j->lo * powf(j->hi / j->lo, t);
-    return am.pos[p] ? j->lo * powf(j->hi / j->lo, (float)(am.pos[p] - 1) / 126.0f) : 0.0f;
+    const knob_t *c = &KN[k];
+    float t = (float)step / 127.0f;
+    if (c->type == KT_LOG)
+        return (c->lo + c->off) * powf((c->hi + c->off) / (c->lo + c->off), t) - c->off;
+    return c->lo + (c->hi - c->lo) * t;
 }
 
-static uint8_t jp_pos(int p, float v)  /* the step nearest v */
+static uint8_t kn_pos(int k, float v)  /* the step (or option) nearest v */
 {
-    const jparam_t *j = &JP[p];
+    const knob_t *c = &KN[k];
     float t;
-    if (j->curve == CV_LIN)
-        t = (v - j->lo) / (j->hi - j->lo) * 127.0f;
-    else if (j->curve == CV_LOG)
-        t = v <= j->lo ? 0.0f : logf(v / j->lo) / logf(j->hi / j->lo) * 127.0f;
+    int i;
+    if (c->type == KT_SEL) {           /* a wave number; the distortion type is its index */
+        for (i = 0; i < c->nopt; i++)
+            if (c->optv == WAVE_V ? (float)WAVE_NUM[i] == v : (float)i == v)
+                return (uint8_t)i;
+        return 0;
+    }
+    if (c->type == KT_LOG)
+        t = v + c->off <= c->lo + c->off ? 0.0f : logf((v + c->off) / (c->lo + c->off)) / logf((c->hi + c->off) / (c->lo + c->off));
     else
-        t = v <= 0.0f ? 0.0f : v <= j->lo ? 1.0f : 1.0f + logf(v / j->lo) / logf(j->hi / j->lo) * 126.0f;
-    t += 0.5f;
+        t = (v - c->lo) / (c->hi - c->lo);
+    t = t * 127.0f + 0.5f;
     return (uint8_t)(t < 0.0f ? 0.0f : t > 127.0f ? 127.0f : t);
 }
 
@@ -92,88 +155,62 @@ static char *fnum(char *b, float x)
     return b;
 }
 
-static void jp_send(int p)             /* knob p's value to AMY */
+/* a value as the editor shows it: three significant digits (its formatValue) */
+static char *fmt3(char *b, float v)
 {
-    char m[64], a[16], b[16], c[16], d[16];
-    int o;
-    switch (p) {
-    case JP_CUTOFF: sprintf(m, "i1v0F%s", fnum(a, jp_value(p))); break;
-    case JP_RESO: sprintf(m, "i1v0R%s", fnum(a, jp_value(p))); break;
-    case JP_ENV: sprintf(m, "i1v0F,,,%s", fnum(a, jp_value(p))); break;        /* the eg0 coefficient */
-    case JP_LFO_VCF: sprintf(m, "i1v0F,,,,,%s", fnum(a, jp_value(p))); break;  /* the mod coefficient */
-    case JP_ATTACK: case JP_DECAY: case JP_SUSTAIN: case JP_RELEASE:           /* the ADSR, as bp0 */
-        sprintf(m, "i1v0A%s,1,%s,%s,%s,0", fnum(a, jp_value(JP_ATTACK)), fnum(b, jp_value(JP_DECAY)),
-                fnum(c, jp_value(JP_SUSTAIN)), fnum(d, jp_value(JP_RELEASE)));
-        break;
-    case JP_PULSE: case JP_SAW: case JP_SUB: case JP_NOISE:
-        sprintf(m, "i1v%da%s", 2 + p - JP_PULSE, fnum(a, jp_value(p)));
-        break;
-    case JP_LFO_RATE: sprintf(m, "i1v1f%s", fnum(a, jp_value(p))); break;
-    case JP_LFO_PITCH:                 /* the three pitched oscs' mod coefficient */
-        for (o = 2; o <= 4; o++) {
-            sprintf(m, "i1v%df,,,,,%s", o, fnum(a, jp_value(p)));
-            engine_amy_send(m);
+    float a = v < 0.0f ? -v : v;
+    int dec = a < 10.0f ? 2 : a < 100.0f ? 1 : 0;
+    uint32_t scale = dec == 2 ? 100u : dec == 1 ? 10u : 1u, s = (uint32_t)(a * (float)scale + 0.5f);
+    if (dec)
+        sprintf(b, "%s%lu.%0*lu", v < 0.0f && s ? "-" : "", (unsigned long)(s / scale), dec, (unsigned long)(s % scale));
+    else
+        sprintf(b, "%s%lu", v < 0.0f && s ? "-" : "", (unsigned long)s);
+    return b;
+}
+
+static void kn_send(int k)             /* knob k's value to AMY: its change_code, %i 1, %v the value */
+{
+    const knob_t *c = &KN[k];
+    char m[96], v[16];
+    const char *s = c->code, *val = c->type == KT_SEL ? c->optv[(int)am.val[k]] : fnum(v, am.val[k]);
+    uint32_t n = 0;
+    for (; *s && n < sizeof m - 16u; s++) {
+        if (s[0] == '%' && s[1] == 'i') {
+            m[n++] = '1';
+            s++;
+        } else if (s[0] == '%' && s[1] == 'v') {
+            const char *t = val;
+            while (*t)
+                m[n++] = *t++;
+            s++;
+        } else {
+            m[n++] = *s;
         }
-        return;
-    case JP_PW: sprintf(m, "i1v2d%s", fnum(a, jp_value(p))); break;
-    case JP_CHORUS: sprintf(m, "k%s", fnum(a, jp_value(p))); break;
-    default: return;
     }
+    m[n] = 0;
     engine_amy_send(m);
 }
 
 static void amy_patch(int n)
 {
     char m[24];
-    int p;
+    int p, k;
     am.patch = (n % AMY_NJUNO + AMY_NJUNO) % AMY_NJUNO;
     sprintf(m, "i1iv%dK%d", X0X_AMY_VOICES, am.patch);
     engine_amy_send(m);
-    for (p = 0; p < JP_N; p++)
-        am.pos[p] = jp_pos(p, AMY_JUNO[am.patch].v[p]);
+    for (p = 0; p < PG_N; p++)
+        for (k = PG[p].first; PG[p].patch && k < PG[p].first + PG[p].n; k++)
+            am.val[k] = KN[k].type == KT_SEL ? (float)kn_pos(k, AMY_JUNO[am.patch].v[k]) : AMY_JUNO[am.patch].v[k];
     am.dirty |= 1u | 4u;
 }
 
-/* ---- the screen: header 0..72, tabs 72..96, knobs 96..240 ---- */
-static void jp_text(int p, char *b)
-{
-    float v = jp_value(p);
-    int32_t i;
-    switch (JP[p].unit) {
-    case U_HZ:
-        if (v >= 1000.0f)
-            sprintf(b, "%d.%d KHZ", (int)(v / 1000.0f), (int)(v / 100.0f) % 10);
-        else if (v >= 100.0f)
-            sprintf(b, "%d HZ", (int)(v + 0.5f));
-        else
-            sprintf(b, "%d.%02d HZ", (int)v, (int)(v * 100.0f + 0.5f) % 100);
-        break;
-    case U_MS:
-        if (v >= 1000.0f)
-            sprintf(b, "%d.%d S", (int)(v / 1000.0f), (int)(v / 100.0f) % 10);
-        else
-            sprintf(b, "%d MS", (int)(v + 0.5f));
-        break;
-    case U_PCT:                        /* the value as a percentage, a decimal below 10 % */
-        i = (int32_t)(v * 1000.0f + 0.5f);
-        if (i < 100)
-            sprintf(b, "%d.%d%%", (int)i / 10, (int)i % 10);
-        else
-            sprintf(b, "%d%%", (int)(i + 5) / 10);
-        break;
-    default:
-        i = (int32_t)(v * 10.0f + (v < 0.0f ? -0.5f : 0.5f));
-        sprintf(b, "%s%d.%d", JP[p].unit == U_SIGNED ? (i < 0 ? "-" : "+") : "", (int)(i < 0 ? -i : i) / 10,
-                (int)(i < 0 ? -i : i) % 10);
-        break;
-    }
-}
-
+/* ---- the screen: header 0..72, page names 72..96, knobs 96..240 ---- */
 static void amy_draw(void)
 {
     char b[48];
     const char *name = AMY_JUNO[am.patch].name, *sp = strchr(name, ' ');
-    int k, x;
+    const page_t *pg = &PG[am.page];
+    int k, x, off = am.page == PG_ECHO;
     if (am.dirty & 1u) {
         cv_begin(240, 72, C_BLACK);
         cv_text(8, 6, &FONT_T, "AMY  JUNO-60", C_GRAY);
@@ -190,27 +227,29 @@ static void amy_draw(void)
         cv_rect(0, 71, 240, 1, C_LINE);
         cv_blit(0, 0);
     }
-    if (am.dirty & 2u) {
+    if (am.dirty & 2u) {               /* the page, with its neighbours (SELECT's ring) either side */
         cv_begin(240, 24, C_BLACK);
-        for (k = 0; k < AMY_NPAGES; k++) {
-            text_c(30 + 60 * k, 5, &FONT_B, AMY_PAGE[k], k == am.page ? C_WHITE : C_DIM);
-            if (k == am.page)
-                cv_rect(10 + 60 * k, 21, 40, 2, C_HI);
-        }
+        cv_text(8, 7, &FONT_T, PG[(am.page + PG_N - 1) % PG_N].name, C_DIM);
+        text_r(232, 7, &FONT_T, PG[(am.page + 1) % PG_N].name, C_DIM);
+        text_c(120, 4, &FONT_B, pg->name, C_WHITE);
+        cv_rect(120 - text_w(&FONT_B, pg->name) / 2, 21, text_w(&FONT_B, pg->name), 2, C_HI);
         cv_blit(0, 72);
     }
     if (am.dirty & 4u) {
         cv_begin(240, 144, C_BLACK);
-        for (k = 0; k < 4; k++) {
-            int p = am.page * 4 + k, y = 36 * k + 4;
+        for (k = 0; k < pg->n; k++) {
+            int i = pg->first + k, y = 36 * k + 4;
+            const knob_t *c = &KN[i];
             sprintf(b, "K%d", k + 1);
             cv_text(8, y + 1, &FONT_T, b, C_DIM);
-            cv_text(30, y, &FONT_XS, JP[p].name, C_GRAY);
-            jp_text(p, b);
-            text_r(232, y, &FONT_S, b, C_HI);
+            cv_text(30, y, &FONT_XS, c->name, off ? C_DIM : C_GRAY);
+            text_r(232, y, &FONT_S, c->type == KT_SEL ? c->opt[(int)am.val[i]] : fmt3(b, am.val[i]), off ? C_DIM : C_HI);
             cv_rect(30, y + 20, 202, 5, C_LINE);
-            cv_rect(30, y + 20, 202 * am.pos[p] / 127, 5, C_HI);
+            cv_rect(30, y + 20, c->type == KT_SEL ? 202 * (int)am.val[i] / (c->nopt - 1) : 202 * kn_pos(i, am.val[i]) / 127, 5,
+                    off ? C_DIM : C_HI);
         }
+        if (off)
+            text_c(120, 36 * 3 + 12, &FONT_XS, "NOT ON THE FM-1 (NO ROOM)", C_AMB);
         cv_blit(0, 96);
     }
     am.dirty = 0;
@@ -218,11 +257,14 @@ static void amy_draw(void)
 
 static void amy_ui_init(void)
 {
+    int k;
     palette_set(proj.set.palette);
     lcd_fill(0, 0, 240, 240, C_BLACK);
     am.page = 0;
     am.octave = 0;
     am.btn_was = 0;
+    for (k = 0; k < KN_N; k++)         /* every knob, the bus effects too, at AMY's power-on value */
+        am.val[k] = KN[k].type == KT_SEL ? (float)kn_pos(k, AMY_JUNO[X0X_AMY_PATCH].v[k]) : AMY_JUNO[X0X_AMY_PATCH].v[k];
     amy_patch(X0X_AMY_PATCH);          /* (engine_amy_init loaded it too: this sets the knobs) */
     am.dirty = 7u;
 }
@@ -230,6 +272,7 @@ static void amy_ui_init(void)
 static void amy_ui_frame(void)
 {
     static const int KNOB[4] = {EN_K1, EN_K2, EN_K3, EN_K4};
+    const page_t *pg;
     uint32_t btn = plat_buttons(), down = btn & ~am.btn_was;
     int32_t d;
     int k;
@@ -237,15 +280,22 @@ static void amy_ui_frame(void)
     if ((d = plat_enc(EN_PRESET)) != 0)
         amy_patch(am.patch + (int)d);
     if ((d = plat_enc(EN_SELECT)) != 0) {
-        am.page = ((am.page + (int)d) % AMY_NPAGES + AMY_NPAGES) % AMY_NPAGES;
+        am.page = ((am.page + (int)d) % PG_N + PG_N) % PG_N;
         am.dirty |= 2u | 4u;
     }
+    pg = &PG[am.page];
     for (k = 0; k < 4; k++)
-        if ((d = plat_enc(KNOB[k])) != 0) {
-            int p = am.page * 4 + k, v = am.pos[p] + (int)d;
-            am.pos[p] = (uint8_t)(v < 0 ? 0 : v > 127 ? 127 : v);
-            jp_send(p);
-            am.dirty |= 4u;
+        if ((d = plat_enc(KNOB[k])) != 0 && k < pg->n && am.page != PG_ECHO) {
+            int i = pg->first + k, sel = KN[i].type == KT_SEL, top = sel ? KN[i].nopt - 1 : 127;
+            int v = (sel ? (int)am.val[i] : kn_pos(i, am.val[i])) + (int)d;
+            float nv;
+            v = v < 0 ? 0 : v > top ? top : v;
+            nv = sel ? (float)v : kn_step(i, v);
+            if (nv != am.val[i]) {
+                am.val[i] = nv;
+                kn_send(i);
+                am.dirty |= 4u;
+            }
         }
     if (down & ((1u << B_OCTDN) | (1u << B_OCTUP))) {
         am.octave += (down & (1u << B_OCTUP)) ? 1 : -1;

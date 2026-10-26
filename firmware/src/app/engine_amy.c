@@ -191,7 +191,8 @@ void engine_amy_init(void)
 {
     char m[32];
     amy_config_t c = amy_default_config();
-    c.features.reverb = c.features.echo = 0;
+    c.features.reverb = 1;             /* its delay lines (~138 KB) only when its level goes up */
+    c.features.echo = 0;               /* ~98..295 KB: no room for it beside the reverb (ui_amy.c) */
     c.features.chorus = 1;             /* most Juno patches switch it on */
     c.features.partials = c.features.custom = c.features.default_synths = 0;
     c.platform.multicore = c.platform.multithread = 0;

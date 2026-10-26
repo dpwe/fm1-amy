@@ -17,7 +17,8 @@
 #include <sys/time.h>
 
 #ifndef X0X_AMY_HEAP
-#define X0X_AMY_HEAP (160u * 1024u)   /* AMY: ~82 KB at start, ~128 KB with 6 Juno voices and chorus */
+#define X0X_AMY_HEAP (256u * 1024u)   /* AMY: ~120 KB with 6 Juno voices and chorus, ~260 KB with the
+                                       * reverb (measured on a 64-bit host; the pool keeps its 8 KB spare) */
 #endif
 #define HB 8u                          /* block header: size in bytes with the header, bit 0 = in use */
 static uint8_t heap[X0X_AMY_HEAP] __attribute__((section(".pool"), aligned(8)));

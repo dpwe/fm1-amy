@@ -5,52 +5,65 @@
     tools/gen_amy_juno.py AMY_DIR/src/patches.h build/gen/amy_juno.h
 
 AMY keeps its patches as wire strings inside patches.c; the UI needs each Juno patch's name and
-the values its knobs start from, in the units ui_amy.c's parameter table uses (the order of JP_*).
-A Juno voice is six oscs: 0 the VCF/VCA output, 1 the LFO, 2 pulse, 3 saw, 4 sub, 5 noise.
+the values its knobs start from. The knobs are the AMYboard editor's (amyboard.com/editor, its
+amy_parameters.js), in its units, in the order of ui_amy.c's JP table: what a patch doesn't set
+reads as the editor's amy_default, AMY's value after a reset.
+A Juno voice is six oscs: 0 the VCF/VCA output (the editor's CTL_OSC), 1 the LFO, 2 pulse (the
+editor's Osc A), 3 saw (Osc B), 4 sub, 5 noise.
 """
 import re
 import sys
 
 NJUNO = 128
-# JP_* in ui_amy.c: VCF page, ENV page, OSC page, LFO page
-NAMES = ["cutoff", "reso", "env", "lfo_vcf", "attack", "decay", "sustain", "release",
-         "pulse", "saw", "sub", "noise", "lfo_rate", "lfo_pitch", "pw", "chorus"]
+NAMES = ["osc a freq", "osc a wave", "osc a duty", "osc a level",
+         "osc b freq", "osc b wave", "osc b duty", "osc b level",
+         "lfo freq", "lfo osc", "lfo pwm", "lfo filt",
+         "vcf freq", "vcf resonance", "vcf kbd", "vcf env",
+         "vcf env attack", "vcf env decay", "vcf env sustain", "vcf env release",
+         "adsr attack", "adsr decay", "adsr sustain", "adsr release",
+         "eq low", "eq mid", "eq high",
+         "chorus level", "chorus freq", "chorus depth",
+         "reverb level", "reverb live", "reverb damp",
+         "echo level", "echo delay", "echo feedback",
+         "distortion type", "distortion drive", "distortion mix"]
 
 
-def nums(arg):
-    """'179.93,0.677,,5.024' -> [179.93, 0.677, None, 5.024]"""
-    return [float(x) if x else None for x in arg.split(",")]
-
-
-def coef(arg, i, default=0.0):
-    v = nums(arg)
-    return v[i] if i < len(v) and v[i] is not None else default
+def field(arg, i, default):
+    """field i of a comma list ('179.93,0.677,,5.024'), default when absent or empty"""
+    if arg is None:
+        return default
+    v = arg.split(",")
+    return float(v[i]) if i < len(v) and v[i] != "" else default
 
 
 def parse(wire):
-    osc = {}
-    chorus = 0.0
+    osc, fx = {}, {}
     for phrase in wire.split("Z"):
         cmds = re.findall(r"([A-Za-z])([-0-9.,]*)", phrase)
-        v = 0
+        v = None
         for c, a in cmds:
             if c == "v":
                 v = int(a)
         for c, a in cmds:
-            if c == "k":
-                chorus = coef(a, 0)
-            elif c != "v":
+            if c == "v":
+                continue
+            if v is None:              # no osc: the bus effects (x EQ, k chorus, h reverb, M echo)
+                fx[c] = a
+            else:
                 osc.setdefault(v, {})[c] = a
-    o0, o1, o2 = osc.get(0, {}), osc.get(1, {}), osc.get(2, {})
-    a = nums(o0.get("A", "0,1,0,1,0,0"))   # ADSR as breakpoints: t,1, t,sustain, t,0
-    adsr = [a[0] or 0.0, a[2] or 0.0, a[3] if a[3] is not None else 1.0, a[4] or 0.0]
+    o0, o1, o2, o3 = (osc.get(k, {}) for k in range(4))
     return [
-        coef(o0.get("F", "1000"), 0, 1000.0), float(o0.get("R", "0.7") or 0.7),
-        coef(o0.get("F", ""), 3), coef(o0.get("F", ""), 5),
-        *adsr,
-        *(coef(osc.get(k, {}).get("a", "0"), 0) for k in (2, 3, 4, 5)),
-        coef(o1.get("f", "1"), 0, 1.0), coef(o2.get("f", ""), 5),
-        coef(o2.get("d", "0.5"), 0, 0.5), chorus,
+        field(o2.get("f"), 0, 440.0), field(o2.get("w"), 0, 0), field(o2.get("d"), 0, 0.5), field(o2.get("a"), 0, 1.0),
+        field(o3.get("f"), 0, 440.0), field(o3.get("w"), 0, 0), field(o3.get("d"), 0, 0.5), field(o3.get("a"), 0, 1.0),
+        field(o1.get("f"), 0, 4.0), field(o2.get("f"), 5, 0.0), field(o2.get("d"), 5, 0.0), field(o0.get("F"), 5, 0.0),
+        field(o0.get("F"), 0, 1000.0), field(o0.get("R"), 0, 0.7), field(o0.get("F"), 1, 0.0), field(o0.get("F"), 4, 0.0),
+        field(o0.get("B"), 0, 0.0), field(o0.get("B"), 2, 0.0), field(o0.get("B"), 3, 0.0), field(o0.get("B"), 4, 0.0),
+        field(o0.get("A"), 0, 0.0), field(o0.get("A"), 2, 0.0), field(o0.get("A"), 3, 1.0), field(o0.get("A"), 4, 0.0),
+        field(fx.get("x"), 0, 0.0), field(fx.get("x"), 1, 0.0), field(fx.get("x"), 2, 0.0),
+        field(fx.get("k"), 0, 0.0), field(fx.get("k"), 2, 0.5), field(fx.get("k"), 3, 0.5),
+        field(fx.get("h"), 0, 0.0), field(fx.get("h"), 1, 0.85), field(fx.get("h"), 2, 0.5),
+        field(fx.get("M"), 0, 0.0), field(fx.get("M"), 1, 500.0), field(fx.get("M"), 3, 0.0),
+        0.0, 1.0, 1.0,                 # distortion: no Juno patch sets it (type off, unity drive, all wet)
     ]
 
 

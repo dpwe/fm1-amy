@@ -1,0 +1,97 @@
+# X0X_AMY (build/host/x0x_amy_host): the eleven pages of the AMYboard editor's patch knobs (ui_amy.c).
+# Every page's screen, then the same chord after a change on four of them, each into its own WAV.
+#   build/host/x0x_amy_host host/amy_pages.x0x OUTDIR
+wait 300
+shot page00.png
+turn SELECT 1
+shot page01.png
+turn SELECT 1
+shot page02.png
+turn SELECT 1
+shot page03.png
+turn SELECT 1
+shot page04.png
+turn SELECT 1
+shot page05.png
+turn SELECT 1
+shot page06.png
+turn SELECT 1
+shot page07.png
+turn SELECT 1
+shot page08.png
+turn SELECT 1
+shot page09.png
+turn SELECT 1
+shot page10.png
+turn SELECT 1
+# page 0 (OSC A) again: the patch as stored
+wav base.wav
+key w0 down
+key w2 down
+key w4 down
+wait 800
+key w0 up
+key w2 up
+key w4 up
+wait 1500
+wavstop
+# VCF: FREQ down 40 steps
+turn SELECT 3
+turn K1 -40 10
+shot vcf_dark.png
+wav vcf_dark.wav
+key w0 down
+key w2 down
+key w4 down
+wait 800
+key w0 up
+key w2 up
+key w4 up
+wait 1500
+wavstop
+turn K1 40 10
+# OSC B: WAVE from SAW UP to SINE
+turn SELECT -2
+turn K2 -2
+shot oscb_sine.png
+wav oscb_sine.wav
+key w0 down
+key w2 down
+key w4 down
+wait 800
+key w0 up
+key w2 up
+key w4 up
+wait 1500
+wavstop
+turn K2 2
+# REVERB: LEVEL up
+turn SELECT 7
+turn K1 70 10
+shot reverb.png
+wav reverb.wav
+key w0 down
+key w2 down
+key w4 down
+wait 800
+key w0 up
+key w2 up
+key w4 up
+wait 1500
+wavstop
+turn K1 -70 10
+# DISTORTION: TYPE clip, DRIVE up
+turn SELECT 2
+turn K1 1
+turn K2 40 10
+shot dist.png
+wav dist.wav
+key w0 down
+key w2 down
+key w4 down
+wait 800
+key w0 up
+key w2 up
+key w4 up
+wait 1500
+wavstop
