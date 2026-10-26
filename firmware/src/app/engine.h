@@ -64,6 +64,7 @@ void engine_amy_init(void);
 void engine_amy_render(int32_t *out_lr, uint32_t n, float gain);   /* ISR; gain = master * codec full scale */
 int engine_amy_send(const char *m);    /* main loop: a wire message for the ISR to give AMY; -1 = queue full */
 void engine_amy_octave(int o);         /* the keys' octave shift, from the next key down */
+void engine_amy_sysex_byte(uint8_t b); /* usb.c (TIMER5 ISR): each SysEx byte, for the AMYboard editor */
 int engine_amy_sounding(void);         /* the last block was not silent (the host's cost measure) */
 #endif
 

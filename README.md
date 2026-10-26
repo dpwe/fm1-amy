@@ -4,6 +4,8 @@ fm1-amy turns the M-VAVE FM-1 into a six-voice polyphonic analog-style synthesiz
 the FM-1's firmware with [AMY](https://github.com/shorepine/amy), a portable synthesizer library,
 playing AMY's emulations of the 128 factory patches of the Roland Juno-60. Pick a patch with
 the PRESETS knob, then shape it with the four knobs: filter, envelope, oscillator mix and LFO.
+Over USB it is also a MIDI instrument, and it can be edited from the
+[AMYboard editor](https://amyboard.com/editor).
 
 ![fm1-amy on an M-VAVE FM-1, showing the ENV page of patch A12 Brass Swell](docs/img/fm1-amy.jpg)
 
@@ -48,11 +50,46 @@ the Juno.
 What it doesn't do (yet):
 
 - **Nothing is saved.** Your knob changes last until you choose another patch or switch off.
-- **No MIDI in.** The FM-1 still shows up as a USB MIDI device (that's how firmware is installed),
-  but notes and controllers sent to it aren't played.
-- **No velocity.** Every note plays at full velocity.
+- **The screen doesn't follow MIDI.** Changes made over MIDI or from the AMYboard editor change
+  the sound, but the knob values on the screen stay where they were.
+- **The keys stay local.** The FM-1's own keys play at full velocity and aren't sent out over
+  MIDI (see [MIDI and the AMYboard editor](#midi-and-the-amyboard-editor)).
 - **Only the Juno patches.** AMY also has 128 DX7 patches, but they are left out to fit the
   FM-1's flash (see [How it works](#how-it-works)).
+
+## MIDI and the AMYboard editor
+
+Over USB the FM-1 is a class-compliant MIDI device, "X0X FM-1" (the name comes from X0X); no
+driver is needed. MIDI channel 1 plays the synth, with note velocity, pitch bend and the sustain
+pedal (CC 64), so a keyboard or a DAW can play it.
+
+The [AMYboard editor](https://amyboard.com/editor) can edit it live. The editor is made for
+[AMYboard](https://amyboard.com), AMY's own hardware, and talks to it in AMY's wire language over
+MIDI SysEx; fm1-amy understands enough of that conversation for the editor's synth controls:
+
+1. Open the editor in Chrome or Edge (they have Web MIDI) and choose **control** mode, allowing
+   MIDI with SysEx when the browser asks.
+2. In the MIDI port settings, choose **X0X FM-1** as both the input and the output. The editor
+   picks ports named "AMYboard" by itself, so choose the FM-1 by hand; its warning about the port
+   names can be dismissed.
+3. The editor's knobs and patch choices for channel 1 now change the FM-1's sound, and its
+   on-screen keyboard plays it.
+
+What doesn't carry over: AMYboard runs Python sketches, which the FM-1 can't, so reading a sketch
+from the board gets no answer and writing one has no effect (the editor warns first that it
+couldn't detect the firmware). Drum kits and DX7 patches don't sound, since fm1-amy has neither
+AMY's samples nor its DX7 patches.
+
+How it works: the editor sends each AMY message as SysEx `F0 00 03 45 <message> F7` and waits for
+an acknowledgement (`F0 00 03 45 'A' 'K' F7`) before sending the next; it pings with `zI`, to which
+the FM-1 answers `OK`. The AMYboard's own commands are acknowledged and otherwise ignored: Python
+(`zP`), reboot (`zB`), reading files (`zD`) and samples. A file or sample upload's data chunks are
+counted off and dropped, so they can't be read as AMY messages. AMY's own MIDI output goes back
+out over USB too.
+
+The FM-1's keys aren't sent out over MIDI by default: in control mode the editor sends what it
+receives back to the board, so every note would play twice. To send them (on channel 1), build
+with `X0X_AMY_KEYS_OUT=1`.
 
 ## Installing
 
@@ -108,7 +145,8 @@ a pi32v2 CPU). [BUILDING.md](BUILDING.md) has the details; in short, on a Mac yo
   If gitee.com can't be reached from your network, a GitHub mirror of the same tag works: the
   build checks the three files against their SHA-256 hashes.
 - **AMY**: a checkout of [shorepine/amy](https://github.com/shorepine/amy), unmodified. fm1-amy
-  was developed against AMY 1.2.200 (commit `c4433d4f`).
+  was developed against AMY 1.2.200 and the current build is tested with AMY 1.2.204
+  (commit `ca31391d`).
   ```bash
   git clone https://github.com/shorepine/amy.git ~/amy
   ```
@@ -123,7 +161,7 @@ X0X_AMY=1 AMY_DIR=~/amy ./build.sh        # build/amy_fw/x0x-amy.fwsc
 The build checks the result as X0X's does and fails if anything is out of bounds:
 
 ```
-  ok    image 304208 B; RAM .data+.bss 77968 B of 98304; pool 233936 B of 344064
+  ok    image 311556 B; RAM .data+.bss 80040 B of 98304; pool 233936 B of 344064
 ```
 
 Without `X0X_AMY=1`, `./build.sh` still builds X0X's groovebox (into `build/`), since this tree
@@ -141,7 +179,9 @@ build/host/x0x_amy_host host/amy_juno.x0x OUTDIR                 # runs a script
 The simulator runs the whole firmware against a simulated FM-1 driven by a script of key presses
 and knob turns (`host/amy_*.x0x`; the commands are listed at the top of `host/x0x_host.c`), and
 writes the audio and the screen to files. At the end it prints how many instructions per sample
-the synth took, a guide to whether a change still fits the FM-1's CPU.
+the synth took, a guide to whether a change still fits the FM-1's CPU. Scripts can send MIDI in
+too (`midi 90 3C 64`, or `sysex i1v0F200Z` for an AMY message as the editor sends it), and the
+MIDI going out is written to `midi_out.txt`; `host/amy_midi.x0x` tests the editor's protocol.
 
 In a browser:
 
@@ -175,8 +215,8 @@ a 336 KB pool for large buffers.
 
 | | fm1-amy | X0X, for comparison |
 |---|---|---|
-| Firmware image | 304 KB | 480 KB |
-| Program data (RAM) | 78 KB | 98 KB |
+| Firmware image | 312 KB | 480 KB |
+| Program data (RAM) | 80 KB | 98 KB |
 | Pool (fm1-amy: AMY's 160 KB heap, the screen's 69 KB canvas, backup buffers) | 234 KB | 336 KB |
 
 To fit, `tools/prep_amy_src.py` copies AMY's sources into the build tree with only the 128 Juno
@@ -198,7 +238,7 @@ itself hasn't been measured yet.
 ## Next steps
 
 - Save edited patches, and recall them.
-- Play notes and controllers arriving over USB MIDI, and send the knobs out as MIDI.
+- Show changes that arrive over MIDI on the screen, and send the knobs out as MIDI.
 - Show the audio load, and use the FM-1's second core.
 - Bring back the DX7 patches, if they can be made to fit.
 - In AMY: build options for leaving out patch banks and samples, and single-precision constants

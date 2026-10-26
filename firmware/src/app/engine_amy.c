@@ -6,7 +6,9 @@
  * messages, and the UI's messages (engine_amy_send, main loop) wait in a queue the ISR empties
  * before the block renders, so the main loop never races the render.
  *
- * The 27 keys play AMY synth 1 (a Juno-60 patch from ui_amy.c, X0X_AMY_PATCH at power-on). */
+ * The 27 keys play AMY synth 1 (a Juno-60 patch from ui_amy.c, X0X_AMY_PATCH at power-on), and so
+ * does USB MIDI on channel 1; the AMYboard editor (amyboard.com/editor, "control" mode) reaches AMY
+ * over USB SysEx (see "MIDI" below). */
 #include <stdio.h>
 #include <string.h>
 #include "amy.h"
@@ -18,6 +20,12 @@
 #endif
 #define AMY_MAX_OSCS 64                /* 6 voices: a Juno voice takes 6 oscs, a DX7 voice 8 */
 #define KEY_NOTE0 53                   /* key 0 = F3, at octave 0 */
+#ifndef X0X_AMY_KEYS_OUT
+#define X0X_AMY_KEYS_OUT 0             /* 1: the keys also go out over USB MIDI, channel 1 (off: the
+                                        * editor echoes MIDI back to the board, which would double them) */
+#endif
+/* a ring's writer publishes its data before its index: a compiler barrier (the cores' order is in-order) */
+#define PUBLISH() __atomic_signal_fence(__ATOMIC_SEQ_CST)
 
 /* the platform layer AMY expects (i2s.c / libminiaudio-audio.c on its own platforms): AMY renders
  * only when engine_amy_render asks, and owns no audio device, MIDI port or thread here */
@@ -44,6 +52,7 @@ int engine_amy_send(const char *m)
     if (w - mq_r >= MQ || strlen(m) >= MQ_LEN)
         return -1;
     strcpy(mq[w % MQ], m);
+    PUBLISH();
     mq_w = w + 1u;
     return 0;
 }
@@ -56,6 +65,127 @@ static uint8_t key_note[NKEYS];        /* the note each held key started: its re
 static uint8_t sounding;               /* the last block was not silent */
 
 int engine_amy_sounding(void) { return sounding; }
+
+/* ---- MIDI over USB ----
+ * In: channel messages (USB-MIDI packets, plat_midi_in) go to AMY's own MIDI handling, so channel 1
+ *   plays synth 1 and its controllers reach AMY's MIDI mappings. SysEx under SPSS's id 00 03 45
+ *   carries AMY wire messages: the AMYboard editor's protocol. usb.c hands every SysEx byte to
+ *   engine_amy_sysex_byte (TIMER5 ISR); whole frames wait in a ring that the audio ISR empties.
+ * Each frame is answered AK once handled (the editor sends its next message only then), a zI ping OK.
+ * The editor's AMYboard-only commands are answered and otherwise ignored: zP (Python), zB (reboot),
+ *   zD (read a file), zF / zS / zO (samples). Its uploads (zT, a file; z<preset>, a sample) are
+ *   followed by base64 chunks, which are counted off and dropped rather than read as AMY messages.
+ * Out: AMY's MIDI output (its external output hook), and the replies, as USB-MIDI packets. */
+#define SX_SLOTS 4u
+#define SX_LEN 512u                    /* a frame's payload: longer ones are answered, not played */
+static char sx_ring[SX_SLOTS][SX_LEN];
+static uint16_t sx_len[SX_SLOTS];      /* SX_LEN: it overflowed */
+static volatile uint32_t sx_w, sx_r;
+static uint32_t sx_pos;
+static uint8_t sx_state;               /* 0 none, 1..3 matching 00 03 45, 4 collecting, 5 not ours */
+static uint32_t sx_skip;               /* an upload's base64 characters still to come (dropped) */
+
+void engine_amy_sysex_byte(uint8_t b)  /* usb.c (TIMER5 ISR) / the host: each SysEx byte, F0 .. F7 */
+{
+    static const uint8_t ID[3] = {0x00, 0x03, 0x45};
+    if (b == 0xF0) {
+        sx_state = sx_w - sx_r < SX_SLOTS ? 1u : 5u;   /* ring full: dropped (the sender times out) */
+        sx_pos = 0;
+    } else if (b == 0xF7) {
+        if (sx_state == 4u) {
+            uint32_t k = sx_w % SX_SLOTS;
+            sx_len[k] = (uint16_t)(sx_pos < SX_LEN ? sx_pos : SX_LEN);
+            if (sx_pos < SX_LEN)
+                sx_ring[k][sx_pos] = 0;
+            PUBLISH();
+            sx_w++;
+        }
+        sx_state = 0;
+    } else if (sx_state >= 1u && sx_state <= 3u) {
+        sx_state = b == ID[sx_state - 1u] ? (uint8_t)(sx_state + 1u) : 5u;
+    } else if (sx_state == 4u) {
+        if (sx_pos < SX_LEN - 1u)
+            sx_ring[sx_w % SX_SLOTS][sx_pos] = (char)b;
+        sx_pos++;
+    }
+}
+
+/* MIDI bytes (one message, or one whole SysEx) as USB-MIDI packets, cable 0; the audio ISR only */
+static void midi_send(uint8_t *b, uint16_t n)
+{
+    uint32_t i = 0;
+    if (!n)
+        return;
+    if (b[0] == 0xF0) {                /* SysEx: CIN 4 for three bytes that go on, 5 / 6 / 7 to end */
+        while (i < n) {
+            uint32_t k = n - i > 3u || (n - i == 3u && b[n - 1u] != 0xF7) ? 3u : n - i;
+            uint32_t cin = k == 3u && (n - i > 3u || b[n - 1u] != 0xF7) ? 4u : 4u + k;
+            plat_midi_out(cin | (uint32_t)b[i] << 8 | (k > 1u ? (uint32_t)b[i + 1u] << 16 : 0u) |
+                          (k > 2u ? (uint32_t)b[i + 2u] << 24 : 0u));
+            i += k;
+        }
+    } else if (b[0] >= 0x80 && b[0] < 0xF0) {
+        plat_midi_out((uint32_t)(b[0] >> 4) | (uint32_t)b[0] << 8 | (n > 1u ? (uint32_t)b[1] << 16 : 0u) |
+                      (n > 2u ? (uint32_t)b[2] << 24 : 0u));
+    } else if (b[0] >= 0xF8) {         /* real time: clock, start, stop */
+        plat_midi_out(0x0Fu | (uint32_t)b[0] << 8);
+    }
+}
+
+static void spss_reply(char a, char c)
+{
+    uint8_t f[7] = {0xF0, 0x00, 0x03, 0x45, (uint8_t)a, (uint8_t)c, 0xF7};
+    midi_send(f, sizeof f);
+}
+
+/* the number after the nth comma: an upload's size */
+static uint32_t field_after_comma(const char *m, int nth)
+{
+    uint32_t v = 0;
+    for (; *m && nth; m++)
+        nth -= *m == ',';
+    for (; *m >= '0' && *m <= '9'; m++)
+        v = v * 10u + (uint32_t)(*m - '0');
+    return v;
+}
+
+static void spss_frame(char *m, uint32_t n)   /* the audio ISR: one 00 03 45 frame's payload */
+{
+    if (n >= SX_LEN) {
+        /* too long for the ring: answered, not played */
+    } else if (m[0] == 'z' && m[1] == 'I') {
+        spss_reply('O', 'K');          /* ping: OK, not AK (as AMY's own parse_sysex) */
+        return;
+    } else if (sx_skip) {
+        sx_skip = n >= sx_skip ? 0u : sx_skip - n;
+    } else if (m[0] == 'z' && m[1] == 'T') {
+        sx_skip = (field_after_comma(m, 1) + 2u) / 3u * 4u;   /* zT<file>,<bytes>: its base64 */
+    } else if (m[0] == 'z' && m[1] >= '0' && m[1] <= '9') {
+        sx_skip = (field_after_comma(m, 1) * 2u + 2u) / 3u * 4u;   /* z<preset>,<frames>,...: 16-bit */
+    } else if (m[0] == 'z' && m[1] && strchr("PBDFSO", m[1])) {
+        /* the AMYboard's own: nothing to do here */
+    } else {
+        amy_add_message(m);
+    }
+    spss_reply('A', 'K');
+}
+
+static void midi_in(void)              /* the audio ISR: what came in over USB since the last block */
+{
+    uint32_t pkt, guard = 64u;
+    while (sx_r != sx_w) {
+        uint32_t k = sx_r % SX_SLOTS;
+        PUBLISH();
+        spss_frame(sx_ring[k], sx_len[k]);
+        sx_r++;
+    }
+    while (guard-- && plat_midi_in(&pkt)) {
+        uint32_t cin = pkt & 15u;
+        uint8_t b[3] = {(uint8_t)(pkt >> 8), (uint8_t)(pkt >> 16), (uint8_t)(pkt >> 24)};
+        if (cin >= 8u && cin <= 0xEu)  /* channel messages; real time is not used */
+            amy_event_midi_message_received(b, cin == 0xCu || cin == 0xDu ? 2u : 3u, 0);
+    }
+}
 
 void engine_amy_init(void)
 {
@@ -70,6 +200,7 @@ void engine_amy_init(void)
     c.max_synths = 8;
     c.max_memory_patches = 4;
     c.max_sequencer_tags = 32;
+    c.amy_external_midi_output_hook = midi_send;
     amy_start(c);
     snprintf(m, sizeof m, "i1iv%dK%d", X0X_AMY_VOICES, X0X_AMY_PATCH);
     amy_add_message(m);
@@ -89,6 +220,12 @@ static void keys_to_notes(void)        /* ISR: each key that went down or up sin
                 key_note[i] = (uint8_t)(KEY_NOTE0 + 12 * octave + i);
             snprintf(m, sizeof m, "i1n%dl%d", key_note[i], (int)((k >> i) & 1u));
             amy_add_message(m);
+#if X0X_AMY_KEYS_OUT
+            {
+                uint8_t on[3] = {(uint8_t)((k >> i) & 1u ? 0x90 : 0x80), key_note[i], 100};
+                midi_send(on, 3);
+            }
+#endif
         }
     keys_was = k;
 }
@@ -110,6 +247,7 @@ void engine_amy_render(int32_t *out_lr, uint32_t n, float gain)
         amy_add_message(mq[mq_r % MQ]);
         mq_r++;
     }
+    midi_in();
     keys_to_notes();
     s = amy_simple_fill_buffer();
     for (i = 0; i < n; i++) {

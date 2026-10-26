@@ -575,9 +575,15 @@ stall:
 }
 
 /* SysEx assembly: only short commands matter here */
+#ifdef X0X_AMY
+void engine_amy_sysex_byte(uint8_t b);   /* X0X_AMY: the AMYboard editor's SysEx (engine_amy.c) */
+#endif
 static void sysex_byte(uint8_t b)
 {
     static const uint8_t UBOOT_KEY[6] = {0xF0, 0x22, 0x24, 0x35, 0x7D, 0xF7};
+#ifdef X0X_AMY
+    engine_amy_sysex_byte(b);
+#endif
     if (b == 0xF0) {
         usb.sx_on = 1;
         usb.sx_len = 0;

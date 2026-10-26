@@ -1,0 +1,32 @@
+# X0X_AMY (build/host/x0x_amy_host): USB MIDI and the AMYboard editor's SysEx (engine_amy.c, "MIDI").
+# A note on channel 1, a ping, an editor knob message (the filter closed) and the same note again,
+# a Python command, a 30-byte file upload (its chunk dropped), then a message that must still play.
+# midi_out.txt: OK for the ping, AK for every other SysEx frame.
+#   build/host/x0x_amy_host host/amy_midi.x0x OUTDIR
+wait 300
+wav amy_midi_open.wav
+midi 90 3C 64
+wait 600
+midi 80 3C 00
+wait 800
+wavstop
+sysex zIZ
+sysex i1v0F60Z
+wait 50
+wav amy_midi_closed.wav
+midi 90 3C 64
+wait 600
+midi 80 3C 00
+wait 800
+wavstop
+sysex zPpassZ
+sysex zT/user/current/sketch.py,30Z
+sysex aW1wb3J0IGFteQpwcmludCgiZm0xLWFteSEhISIp
+sysex i1v0F4000Z
+wait 50
+wav amy_midi_reopened.wav
+midi 90 3C 64
+wait 600
+midi 80 3C 00
+wait 800
+wavstop

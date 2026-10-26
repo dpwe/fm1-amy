@@ -17,6 +17,7 @@
  *   slot K NAME A.wav [B.wav..]  user sample slot K (0..2): one loop (zone) per WAV, encoded here
  *   slotimg K F.hdr F.bin       slot K from tools/upload_breaks.py --dry-run's image (the device format)
  *   midi B0 B1 B2                incoming USB MIDI message (hex bytes)
+ *   sysex TEXT                   X0X_AMY: incoming SysEx F0 00 03 45 TEXT F7 (an AMYboard editor message)
  *   wav FILE | wavstop           start / stop recording the output
  *   load N                       the overload guard sees every block cost N% (-1: as measured)
  *   peakreset                    restart the output peak (expect peak_db_min / peak_db_max)
@@ -1080,6 +1081,17 @@ int main(int argc, char **argv)
             uint32_t s = (uint32_t)strtoul(a, 0, 16), d1 = (uint32_t)strtoul(b, 0, 16), d2 = (uint32_t)strtoul(c, 0, 16);
             uint32_t cin = s >= 0xF0 ? 0x0F : s >> 4;
             min_q[mi_w++ % MQ] = cin | s << 8 | d1 << 16 | d2 << 24;
+#ifdef X0X_AMY
+        } else if (!strcmp(cmd, "sysex")) {           /* sysex TEXT: F0 00 03 45 TEXT F7, as the AMYboard editor sends */
+            const char *t = strstr(line, "sysex") + 6;
+            engine_amy_sysex_byte(0xF0);
+            engine_amy_sysex_byte(0x00);
+            engine_amy_sysex_byte(0x03);
+            engine_amy_sysex_byte(0x45);
+            for (; *t && *t != '\n' && *t != '\r'; t++)
+                engine_amy_sysex_byte((uint8_t)*t);
+            engine_amy_sysex_byte(0xF7);
+#endif
         } else if (!strcmp(cmd, "wav")) {
             snprintf(out, sizeof out, "%s/%s", dir, a);
             wav_open(out);
