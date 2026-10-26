@@ -577,6 +577,15 @@ stall:
 /* SysEx assembly: only short commands matter here */
 #ifdef X0X_AMY
 void engine_amy_sysex_byte(uint8_t b);   /* X0X_AMY: the AMYboard editor's SysEx (engine_amy.c) */
+/* X0X_AMY: the frame buffer below holds one frame, and a frame waiting in it keeps the next one out.
+ * A host doing MIDI thru (the AMYboard editor in control mode echoes all but its own SysEx back to
+ * the board) sends our own frames back, and an echo waiting there when the installer's one "success"
+ * reply comes loses the reply: the install stops at CONFIRM. So an echo of the last frame we sent
+ * (FNV-1a hash and length of its bytes between F0 and F7: ota_wire_send) is not kept, nor the
+ * editor's frames (00 03 45), which engine_amy.c takes; neither is for this buffer's readers. */
+#define SX_FNV0 2166136261u
+static volatile uint32_t sx_echo_hash, sx_echo_len;
+static uint32_t sx_hash;
 #endif
 static void sysex_byte(uint8_t b)
 {
@@ -590,6 +599,9 @@ static void sysex_byte(uint8_t b)
 #if FELUCCA_OTA
         sx_collect = !sx_ready;
         sx_pos = 0;
+#ifdef X0X_AMY
+        sx_hash = SX_FNV0;
+#endif
 #endif
     }
     if (!usb.sx_on)
@@ -600,6 +612,9 @@ static void sysex_byte(uint8_t b)
             sx_frame[sx_pos++] = b;
         else
             sx_collect = 0;                             /* too long: not ours */
+#ifdef X0X_AMY
+        sx_hash = (sx_hash ^ b) * 16777619u;
+#endif
     }
 #endif
     if (usb.sx_len < sizeof usb.sysex)
@@ -614,6 +629,11 @@ static void sysex_byte(uint8_t b)
         else if (usb.sx_len == 6u && usb.sysex[1] == 0x22 && usb.sysex[2] == 0x24 && usb.sysex[3] == 0x35 &&
                  usb.sysex[4] == 0x7F)
             usb.ota_req = 1;
+#ifdef X0X_AMY
+        else if (sx_collect && ((sx_pos == sx_echo_len && sx_hash == sx_echo_hash) ||
+                                (sx_pos >= 3u && sx_frame[0] == 0x00 && sx_frame[1] == 0x03 && sx_frame[2] == 0x45)))
+            ;                                           /* our own frame echoed, or the editor's: not kept */
+#endif
         else if (sx_collect && sx_pos) {
             sx_frame_len = sx_pos;
             RING_PUBLISH();
@@ -665,6 +685,15 @@ static void ota_idle(void);
 static int ota_wire_send(const uint8_t *p, uint32_t n)   /* F0..F7 -> USB-MIDI SysEx packets */
 {
     uint32_t i = 0, t0 = ota_now_ms();
+#ifdef X0X_AMY
+    {                                                   /* remembered, to know its echo (sysex_byte) */
+        uint32_t h = SX_FNV0, j;
+        for (j = 1; j + 1u < n; j++)
+            h = (h ^ p[j]) * 16777619u;
+        sx_echo_hash = h;
+        sx_echo_len = n >= 2u ? n - 2u : 0u;
+    }
+#endif
     sx_busy = 1;
     while (i < n) {
         uint32_t k = n - i >= 3u ? 3u : n - i, pkt;

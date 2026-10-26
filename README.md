@@ -155,6 +155,15 @@ reports `FM-1_900`, the identity of a development build, and its USB MIDI port i
 To go back to X0X, install its firmware from [X0X's web installer](https://charlesvestal.github.io/fm1-x0x/install/),
 which can also put M-VAVE's firmware back.
 
+**If the install stops with "the update loader did not appear"** (the FM-1's screen showed
+UPDATE / CONFIRM), nothing was written and the FM-1 goes back to what it was running; run the
+install again. The usual cause is a program doing MIDI thru on the FM-1's port, such as the
+AMYboard editor in control mode, which sends everything it receives from the board back to it: an
+echo of the FM-1's own update messages could block the installer's single confirming reply.
+fm1-amy's firmware ignores those echoes, so this only happens when installing over an older
+fm1-amy, or over X0X, with such a program open. Closing the editor (or deselecting the FM-1 in
+it) during the install avoids it.
+
 ## If something goes wrong
 
 These come from X0X and Felucca, and still work in fm1-amy:
