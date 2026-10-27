@@ -1,0 +1,39 @@
+# X0X_AMY (build/host/x0x_amy_host): the screen follows what the AMYboard editor and MIDI change.
+# The editor's Load Preset for A16 over SysEx (its base message, then i1 + each message, a frame
+# after each AK), then single editor knob messages and MIDI CC 74; a screenshot after each. The header
+# should name A16, and the knobs show what was sent (X0X_AMY_LOG=1 builds print each reading).
+#   build/host/x0x_amy_host host/amy_readback.x0x OUTDIR
+wait 300
+sysex K257i1iv6
+wait 10
+sysex i1v0w20L1c2G4a1,0,1,1,0A358,1,3827,0.417,453,0R1.015F2151.9,0.323,,,0.346,0B358,1,3827,0.417,453,0Z
+wait 10
+sysex i1v2w1L1f220,1,,,,0,1d0.5,,,,,0.22a0.614,,0,0c3Z
+wait 10
+sysex i1v3w1L1f110,1,,,,0,1d0.5,,,,,0.22a0.111134,,0,0Z
+wait 10
+sysex i1v1w4a1,0,0,1f1.483,0,,0,0,0,0A5,1,100,1,10000,0Z
+wait 10
+sysex i1x7,-3,-3k1,,0.5,0.5Z
+wait 10
+wait 100
+turn SELECT 3
+shot rb_vcf_preset.png
+sysex i1v0F1234Z
+wait 10
+wait 100
+shot rb_vcf_1234.png
+turn SELECT -3
+sysex i1v2w5Z
+wait 10
+wait 100
+shot rb_osca_noise.png
+turn SELECT 8
+sysex i1h0.4Z
+wait 10
+wait 100
+shot rb_reverb.png
+turn SELECT -5
+midi B0 4A 40
+wait 100
+shot rb_vcf_cc74.png

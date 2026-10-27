@@ -66,6 +66,11 @@ void engine_amy_preset(const char *base, const char *const *msg, int n);   /* ma
 void engine_amy_octave(int o);         /* the keys' octave shift, from the next key down */
 void engine_amy_sysex_byte(uint8_t b); /* usb.c (TIMER5 ISR): each SysEx byte, for the AMYboard editor */
 int engine_amy_sounding(void);         /* the last block was not silent (the host's cost measure) */
+/* synth 1 read back from AMY after the AMYboard editor or MIDI changed it: the editor's 39 patch knob
+ * values, in amy_juno.h's order (tools/gen_amy_juno.py NAMES; selectors as AMY's numbers: a wave, the
+ * distortion type's index). Main loop: 1 = a new reading in v[] since the last call. */
+#define X0X_AMY_NKNOB 39
+int engine_amy_readback(float v[X0X_AMY_NKNOB]);
 #endif
 
 /* parameter descriptors (UI) */

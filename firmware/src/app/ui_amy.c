@@ -26,6 +26,9 @@
  * Choosing a preset puts the knobs where its messages set them (build/gen/amy_juno.h,
  * tools/gen_amy_juno.py); the bus effects no preset sets (reverb, echo, distortion) keep theirs.
  * Echo is shown but does nothing: its delay line doesn't fit beside the reverb in the FM-1's RAM.
+ * What the AMYboard editor (or a MIDI controller) changes shows here too: the engine reads synth 1
+ * back from AMY (engine_amy_readback) and the knobs follow, except one just turned here; when the
+ * reading is one of the presets (the editor's Load Preset), the header names it.
  * Nothing is saved: power-on is X0X_AMY_PATCH with its own values. */
 #include <stddef.h>
 #include <stdio.h>
@@ -100,6 +103,7 @@ static const knob_t KN[] = {
 };
 #define KN_N ((int)(sizeof KN / sizeof KN[0]))
 _Static_assert(sizeof KN / sizeof KN[0] == AMY_JUNO_NV, "tools/gen_amy_juno.py writes one value per knob");
+_Static_assert(AMY_JUNO_NV == X0X_AMY_NKNOB, "engine_amy.c reads back one value per knob, in this order");
 
 typedef struct {
     const char *name;
@@ -127,13 +131,16 @@ static uint16_t shade(uint16_t c)      /* 70 % of an RGB565 colour */
 }
 #define PG_N ((int)(sizeof PG / sizeof PG[0]))
 _Static_assert(sizeof PG / sizeof PG[0] == B_PLAY - B_FX + 1, "a button for each page: FX .. PLAY/STOP");
+#define PG_REVERB 8                    /* the first page no preset sets */
 #define PG_ECHO 9                      /* shown, not played (see the top) */
 #define PRESET_REST_MS 150u
+#define TURN_HOLD_MS 500u                 /* a knob turned here keeps its value against a readback this long */
 
 static struct {
     int patch, page, octave, load;     /* load: the preset still to load (PRESET is turning) */
     uint32_t load_t;                   /* when PRESET last turned */
     float val[KN_N];                   /* a continuous knob's value, a selector's option */
+    uint32_t turn_t[KN_N];             /* when each knob was last turned here; 0 = never */
     uint32_t btn_was;
     uint8_t dirty;                     /* redraw: 1 header, 2 page names, 4 knobs */
 } am;
@@ -282,6 +289,39 @@ static void amy_draw(void)
     am.dirty = 0;
 }
 
+static int same(float a, float b)      /* equal, up to AMY's float round trips */
+{
+    float d = a - b, m = (b < 0.0f ? -b : b) > 1.0f ? (b < 0.0f ? -b : b) : 1.0f;
+    return (d < 0.0f ? -d : d) <= 1e-3f * m;
+}
+
+static void amy_readback(const float *rb)   /* synth 1 as AMY has it, after the editor or MIDI changed it */
+{
+    int p, k, n;
+    for (n = 0; n < AMY_NJUNO; n++) {   /* the editor loaded a preset: which (the pages a preset sets) */
+        for (k = 0; k < PG[PG_REVERB].first && same(rb[k], AMY_JUNO[n].v[k]); k++)
+            ;
+        if (k == PG[PG_REVERB].first) {
+            if (n != am.patch) {
+                am.patch = n;
+                am.load = 0;
+                am.dirty |= 1u;
+            }
+            break;
+        }
+    }
+    for (p = 0; p < PG_N; p++)
+        for (k = PG[p].first; p != PG_ECHO && k < PG[p].first + PG[p].n; k++) {
+            float nv = KN[k].type == KT_SEL ? (float)kn_pos(k, rb[k]) : rb[k], d = nv - am.val[k];
+            if (am.turn_t[k] && plat_ms() - am.turn_t[k] < TURN_HOLD_MS)
+                continue;
+            if ((d < 0.0f ? -d : d) > 1e-4f * (nv < 0.0f ? -nv : nv > 1.0f ? nv : 1.0f)) {
+                am.val[k] = nv;
+                am.dirty |= 4u;
+            }
+        }
+}
+
 static void amy_ui_init(void)
 {
     int k;
@@ -303,6 +343,7 @@ static void amy_ui_frame(void)
     static const int KNOB[4] = {EN_K1, EN_K2, EN_K3, EN_K4};
     const page_t *pg;
     uint32_t btn = plat_buttons(), down = btn & ~am.btn_was;
+    float rb[X0X_AMY_NKNOB];
     int32_t d;
     int k;
     am.btn_was = btn;
@@ -330,6 +371,7 @@ static void amy_ui_frame(void)
             float nv;
             v = v < 0 ? 0 : v > top ? top : v;
             nv = sel ? (float)v : kn_step(i, v);
+            am.turn_t[i] = plat_ms() | 1u;   /* (never 0) */
             if (nv != am.val[i]) {
                 am.val[i] = nv;
                 kn_send(i);
@@ -342,6 +384,8 @@ static void amy_ui_frame(void)
         engine_amy_octave(am.octave);
         am.dirty |= 1u;
     }
+    if (engine_amy_readback(rb))
+        amy_readback(rb);
     if (am.dirty)
         amy_draw();
     plat_leds((1u << (B_FX + am.page)) | (am.octave < 0 ? 1u << B_OCTDN : 0u) | (am.octave > 0 ? 1u << B_OCTUP : 0u),

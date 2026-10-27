@@ -91,8 +91,6 @@ Reverb and distortion, which no preset sets, keep their settings across presets.
 What it doesn't do (yet):
 
 - **Nothing is saved.** Your knob changes last until you choose another patch or switch off.
-- **The screen doesn't follow MIDI.** Changes made over MIDI or from the AMYboard editor change
-  the sound, but the knob values on the screen stay where they were.
 - **The keys stay local.** The FM-1's own keys play at full velocity and aren't sent out over
   MIDI (see [MIDI and the AMYboard editor](#midi-and-the-amyboard-editor)).
 - **No echo.** The ECHO page is shown, to match the editor, but does nothing: the FM-1 doesn't have
@@ -119,7 +117,15 @@ MIDI SysEx; fm1-amy understands enough of that conversation for the editor's syn
    picks ports named "AMYboard" by itself, so choose the FM-1 by hand; its warning about the port
    names can be dismissed.
 3. The editor's knobs and patch choices for channel 1 now change the FM-1's sound, and its
-   on-screen keyboard plays it.
+   on-screen keyboard plays it. The FM-1's screen follows: its knobs move to what the editor sets,
+   and when the editor loads a Juno preset, the FM-1 names it.
+
+The screen follows MIDI controllers too (patch 257's CCs, above). After a change from the editor
+or a controller, the FM-1 reads its synth back from AMY and shows the values as the editor's own
+knobs would (the editor's mapping, `set_knobs_from_events`); a reading that equals one of the
+presets names that preset in the header, since the editor's Load Preset sends only messages. A
+knob you turn on the FM-1 keeps your value for half a second, so a reading arriving meanwhile
+doesn't snatch it back.
 
 What doesn't carry over: AMYboard runs Python sketches, which the FM-1 can't, so reading a sketch
 from the board gets no answer and writing one has no effect (the editor warns first that it
@@ -216,7 +222,7 @@ X0X_AMY=1 AMY_DIR=~/amy ./build.sh        # build/amy_fw/x0x-amy.fwsc
 The build checks the result as X0X's does and fails if anything is out of bounds:
 
 ```
-  ok    image 319980 B; RAM .data+.bss 80212 B of 98304; pool 332240 B of 344064
+  ok    image 321660 B; RAM .data+.bss 81624 B of 98304; pool 332240 B of 344064
 ```
 
 Without `X0X_AMY=1`, `./build.sh` still builds X0X's groovebox (into `build/`), since this tree
@@ -250,7 +256,8 @@ and knob turns (`host/amy_*.x0x`; the commands are listed at the top of `host/x0
 writes the audio and the screen to files. At the end it prints how many instructions per sample
 the synth took, a guide to whether a change still fits the FM-1's CPU. Scripts can send MIDI in
 too (`midi 90 3C 64`, or `sysex i1v0F200Z` for an AMY message as the editor sends it), and the
-MIDI going out is written to `midi_out.txt`; `host/amy_midi.x0x` tests the editor's protocol.
+MIDI going out is written to `midi_out.txt`; `host/amy_midi.x0x` tests the editor's protocol, and
+`host/amy_readback.x0x` that the screen follows the editor (its Load Preset, single knobs, a CC).
 
 In a browser:
 
@@ -287,8 +294,8 @@ a 336 KB pool for large buffers.
 
 | | fm1-amy | X0X, for comparison |
 |---|---|---|
-| Firmware image | 320 KB | 480 KB |
-| Program data (RAM) | 80 KB | 98 KB |
+| Firmware image | 322 KB | 480 KB |
+| Program data (RAM) | 82 KB | 98 KB |
 | Pool (fm1-amy: AMY's 256 KB heap, the screen's 69 KB canvas, backup buffers) | 332 KB | 336 KB |
 
 To fit, `tools/prep_amy_src.py` copies AMY's sources into the build tree with only patch 257 (the
@@ -316,7 +323,7 @@ itself hasn't been measured yet.
 ## Next steps
 
 - Save edited patches, and recall them.
-- Show changes that arrive over MIDI on the screen, and send the knobs out as MIDI.
+- Send the FM-1's knobs out as MIDI, so the editor's knobs follow the FM-1 too.
 - Show the audio load, and use the FM-1's second core.
 - Bring back the DX7 patches, loaded as the editor loads them, if they can be made to fit.
 - In AMY: build options for leaving out patch banks and samples, and single-precision constants

@@ -112,6 +112,115 @@ static uint8_t sounding;               /* the last block was not silent */
 
 int engine_amy_sounding(void) { return sounding; }
 
+/* ---- reading synth 1 back, for the screen ----
+ * When a message from the editor (SysEx) or a MIDI controller or program change has changed AMY,
+ * the ISR reads synth 1 back after the next block (at most every RB_BLOCKS) with AMY's
+ * yield_synth_events, and turns the events into the knob values as the editor's own readback does
+ * (amy_parameters.js set_knobs_from_events): what an event leaves unset reads as AMY's default.
+ * The main loop takes the reading through a double buffer (engine_amy_readback). */
+void *yield_synth_events(uint8_t instr_num, struct amy_event *event, bool include_fx, void *state);   /* patches.c */
+enum { RB_OSCA = 0, RB_OSCB = 4, RB_LFO = 8, RB_VCF = 12, RB_FENV = 16, RB_ADSR = 20, RB_EQ = 24, RB_CHORUS = 27,
+       RB_REVERB = 30, RB_ECHO = 33, RB_DIST = 36 };   /* amy_juno.h's order: each page's first knob */
+#define RB_BLOCKS 4u                   /* ~23 ms: a burst of the editor's messages makes one reading */
+static float rb_buf[2][X0X_AMY_NKNOB];
+static volatile uint32_t rb_seq;       /* readings made; rb_buf[(rb_seq - 1) & 1] is the latest */
+static uint8_t rb_due, rb_wait;
+static amy_event rb_ev;                /* (900 B: not on the ISR's stack) */
+
+static int rb_set_f(float x) { return AMY_IS_SET(x); }
+static int rb_set_t(uint32_t t) { return AMY_IS_SET(t) && t != 32767u; }   /* (the editor's BP_UNSET too) */
+
+static void readback(void)             /* the audio ISR */
+{
+    float *v = rb_buf[rb_seq & 1u];
+    void *state = NULL;
+    int clip = 0, fold = 0, crush = 0, o;
+    float pwm = 0.0f, lfo_osc = 0.0f;
+    static const float DEF[X0X_AMY_NKNOB] = {
+        440, 0, 0.5f, 1, 440, 0, 0.5f, 1,             /* OSC A, OSC B: freq, wave, duty, level */
+        4, 0, 0, 0,                                   /* LFO: freq, osc, pwm, filt */
+        1000, 0.7f, 0, 0,                             /* VCF: freq, resonance, kbd, env */
+        0, 0, 0, 0,                                   /* VCF ENV: no breakpoints */
+        0, 0, 1, 0,                                   /* ADSR: no breakpoints (sustain 1) */
+        0, 0, 0, 0, 0.5f, 0.5f, 0, 0.85f, 0.5f,       /* EQ, CHORUS, REVERB */
+        0, 500, 0, 0, 1, 1};                          /* ECHO, DISTORTION */
+    memcpy(v, DEF, sizeof DEF);
+    do {
+        amy_clear_event(&rb_ev);
+        state = yield_synth_events(1, &rb_ev, true, state);
+        if (AMY_IS_UNSET(rb_ev.osc)) {             /* the preamble, or the bus's effects */
+            if (rb_set_f(rb_ev.eq_l)) {
+                v[RB_EQ] = rb_ev.eq_l;
+                v[RB_EQ + 1] = rb_ev.eq_m;
+                v[RB_EQ + 2] = rb_ev.eq_h;
+            }
+            if (rb_set_f(rb_ev.chorus_level)) v[RB_CHORUS] = rb_ev.chorus_level;
+            if (rb_set_f(rb_ev.chorus_lfo_freq)) v[RB_CHORUS + 1] = rb_ev.chorus_lfo_freq;
+            if (rb_set_f(rb_ev.chorus_depth)) v[RB_CHORUS + 2] = rb_ev.chorus_depth;
+            if (rb_set_f(rb_ev.reverb_level)) v[RB_REVERB] = rb_ev.reverb_level;
+            if (rb_set_f(rb_ev.reverb_liveness)) v[RB_REVERB + 1] = rb_ev.reverb_liveness;
+            if (rb_set_f(rb_ev.reverb_damping)) v[RB_REVERB + 2] = rb_ev.reverb_damping;
+            if (AMY_IS_SET(rb_ev.dist_clip)) clip = rb_ev.dist_clip != 0;
+            if (AMY_IS_SET(rb_ev.dist_fold)) fold = rb_ev.dist_fold != 0;
+            if (AMY_IS_SET(rb_ev.dist_crush)) crush = rb_ev.dist_crush != 0;
+            if (rb_set_f(rb_ev.dist_drive_coefs[0])) v[RB_DIST + 1] = rb_ev.dist_drive_coefs[0];
+            if (rb_set_f(rb_ev.dist_mix_coefs[0])) v[RB_DIST + 2] = rb_ev.dist_mix_coefs[0];
+            continue;
+        }
+        o = rb_ev.osc;
+        if (o == 1) {                                 /* the LFO */
+            if (rb_set_f(rb_ev.freq_coefs[0])) v[RB_LFO] = rb_ev.freq_coefs[0];
+        } else if (o == 0) {                          /* the filter and VCA */
+            if (rb_set_f(rb_ev.filter_freq_coefs[0])) v[RB_VCF] = rb_ev.filter_freq_coefs[0];
+            if (rb_set_f(rb_ev.filter_freq_coefs[1])) v[RB_VCF + 2] = rb_ev.filter_freq_coefs[1];
+            if (rb_set_f(rb_ev.filter_freq_coefs[4])) v[RB_VCF + 3] = rb_ev.filter_freq_coefs[4];
+            if (rb_set_f(rb_ev.filter_freq_coefs[5])) v[RB_LFO + 3] = rb_ev.filter_freq_coefs[5];
+            if (rb_set_f(rb_ev.resonance)) v[RB_VCF + 1] = rb_ev.resonance;
+            if (rb_set_t(rb_ev.eg1_times[0])) v[RB_FENV] = (float)rb_ev.eg1_times[0];
+            if (rb_set_t(rb_ev.eg1_times[1])) v[RB_FENV + 1] = (float)rb_ev.eg1_times[1];
+            if (rb_set_f(rb_ev.eg1_values[1])) v[RB_FENV + 2] = rb_ev.eg1_values[1];
+            if (rb_set_t(rb_ev.eg1_times[2])) v[RB_FENV + 3] = (float)rb_ev.eg1_times[2];
+            if (rb_set_t(rb_ev.eg0_times[0])) v[RB_ADSR] = (float)rb_ev.eg0_times[0];
+            if (rb_set_t(rb_ev.eg0_times[1])) v[RB_ADSR + 1] = (float)rb_ev.eg0_times[1];
+            if (rb_set_f(rb_ev.eg0_values[1])) v[RB_ADSR + 2] = rb_ev.eg0_values[1];
+            if (rb_set_t(rb_ev.eg0_times[2])) v[RB_ADSR + 3] = (float)rb_ev.eg0_times[2];
+        } else if (o == 2 || o == 3) {                /* Osc A, Osc B */
+            float *k = &v[o == 2 ? RB_OSCA : RB_OSCB];
+            if (rb_set_f(rb_ev.freq_coefs[0]) && rb_ev.freq_coefs[0] > 0.0f) k[0] = rb_ev.freq_coefs[0];
+            if (AMY_IS_SET(rb_ev.wave) && rb_ev.wave < 127) k[1] = (float)rb_ev.wave;
+            if (rb_set_f(rb_ev.duty_coefs[0]) && rb_ev.duty_coefs[0] > 0.0f) k[2] = rb_ev.duty_coefs[0];
+            if (rb_set_f(rb_ev.amp_coefs[0])) k[3] = rb_ev.amp_coefs[0];
+            if (rb_set_f(rb_ev.duty_coefs[5]) && rb_ev.duty_coefs[5] > pwm) pwm = rb_ev.duty_coefs[5];
+            if (rb_set_f(rb_ev.freq_coefs[5]) && rb_ev.freq_coefs[5] > 0.0f) lfo_osc = rb_ev.freq_coefs[5];
+        }
+    } while (state);
+    v[RB_LFO + 1] = lfo_osc;
+    v[RB_LFO + 2] = pwm;
+    v[RB_DIST] = (float)(crush ? ((clip || fold) ? 5 : 4) : (clip ? 1 : 0) + (fold ? 2 : 0));   /* its "type" */
+#if X0X_AMY_LOG
+    for (o = 0; o < X0X_AMY_NKNOB; o++)
+        fprintf(stderr, "%s%g", o ? "," : "readback ", (double)v[o]);
+    fprintf(stderr, "\n");
+#endif
+    PUBLISH();
+    rb_seq++;
+}
+
+int engine_amy_readback(float v[X0X_AMY_NKNOB])
+{
+    static uint32_t seen;
+    uint32_t s = rb_seq;
+    if (s == seen)
+        return 0;
+    PUBLISH();
+    memcpy(v, rb_buf[(s - 1u) & 1u], sizeof rb_buf[0]);
+    PUBLISH();
+    if (rb_seq - s > 1u)               /* overwritten while copying (two readings since): next frame */
+        return 0;
+    seen = s;
+    return 1;
+}
+
 /* ---- MIDI over USB ----
  * In: channel messages (USB-MIDI packets, plat_midi_in) go to AMY's own MIDI handling, so channel 1
  *   plays synth 1 and its controllers reach AMY's MIDI mappings. SysEx under SPSS's id 00 03 45
@@ -212,6 +321,7 @@ static void spss_frame(char *m, uint32_t n)   /* the audio ISR: one 00 03 45 fra
         /* the AMYboard's own: nothing to do here */
     } else {
         amy_msg(m);
+        rb_due = 1;                    /* the screen reads it back */
     }
     spss_reply('A', 'K');
 }
@@ -228,8 +338,11 @@ static void midi_in(void)              /* the audio ISR: what came in over USB s
     while (guard-- && plat_midi_in(&pkt)) {
         uint32_t cin = pkt & 15u;
         uint8_t b[3] = {(uint8_t)(pkt >> 8), (uint8_t)(pkt >> 16), (uint8_t)(pkt >> 24)};
-        if (cin >= 8u && cin <= 0xEu)  /* channel messages; real time is not used */
+        if (cin >= 8u && cin <= 0xEu) {   /* channel messages; real time is not used */
             amy_event_midi_message_received(b, cin == 0xCu || cin == 0xDu ? 2u : 3u, 0);
+            if (cin == 0xBu || cin == 0xCu)    /* a controller or program change may change the patch */
+                rb_due = 1;
+        }
     }
 }
 
@@ -304,6 +417,13 @@ void engine_amy_render(int32_t *out_lr, uint32_t n, float gain)
             eng_scope[eng_scope_w++ & (SCOPE_N - 1u)] = (int16_t)(((int32_t)s[2u * i] + s[2u * i + 1u]) / 2);
     }
     sounding = any != 0;
+    if (rb_wait)
+        rb_wait--;
+    else if (rb_due) {                 /* after the block that applied the change */
+        rb_due = 0;
+        rb_wait = RB_BLOCKS - 1u;
+        readback();
+    }
 }
 
 /* ---- engine.h, in place of engine.c ----
