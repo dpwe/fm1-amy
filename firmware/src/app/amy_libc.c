@@ -6,9 +6,12 @@
  * malloc / free: first fit over one arena in the .pool RAM region, merging free neighbours as it
  *   walks. Only AMY allocates, and only from the audio ISR (at start-up and on a patch change), so
  *   there is one context and no lock.
- * printf family: integers, strings, characters and pointers. A float argument prints "?": AMY
- *   formats floats only in diagnostics, and printing one would link soft-double routines (the FPU
- *   is single precision; tools/build.py fails a build that links them). fprintf goes nowhere.
+ * printf family: integers, strings, characters, pointers, and floats as %f (%g and %e as %f with
+ *   up to six decimals, trailing zeros dropped; no exponents). AMY needs the floats: a MIDI note or a
+ *   mapped CC becomes a wire message with its value written "%.3f". A float argument arrives as a
+ *   double, and the FPU is single precision (tools/build.py fails a build that links soft-double
+ *   arithmetic), so the double's bits are turned into digits with integer arithmetic. fprintf goes
+ *   nowhere.
  * abort / assert: a trap, so X0X's crash screen shows where and the FM-1 restarts. */
 #include <stdarg.h>
 #include <stddef.h>
@@ -96,11 +99,79 @@ static void put_field(out_t *o, const char *s, int len, int width, int left, cha
         put(o, ' ');
 }
 
+/* a double (its IEEE-754 bits: no double arithmetic) as %f with prec (<= 9) decimals, rounded as
+ * the C library does (to nearest, exact ties to even); trim: drop trailing zeros and a bare point
+ * (%g). The fraction is kept exactly, in two 64-bit words: below 2^-33 a value shows as 0 at nine
+ * decimals, so it needs at most 86 bits. Returns the length; |x| >= 2^63 prints "?" */
+static int fmt_double(char *s, uint64_t u, int prec, int trim)
+{
+    uint64_t mant = u & ((1ull << 52) - 1u), ip = 0, hi = 0, lo = 0;
+    int ex = (int)((u >> 52) & 0x7FFu), e2, sh = 0, n = 0, i, up;
+    char d[12], ib[24];
+    if (u >> 63)
+        s[n++] = '-';
+    if (ex == 0x7FF) {
+        s[n++] = mant ? 'n' : 'i';
+        s[n++] = mant ? 'a' : 'n';
+        s[n++] = mant ? 'n' : 'f';
+        return n;
+    }
+    if (ex)
+        mant |= 1ull << 52;
+    e2 = ex ? ex - 1075 : -1074;                      /* the value is mant * 2^e2 */
+    if (e2 >= 11) {
+        s[n++] = '?';
+        return n;
+    }
+    if (e2 >= 0) {
+        ip = mant << e2;
+    } else if (e2 >= -86) {                           /* the fraction, rem = hi:lo, is below 2^sh */
+        sh = -e2;
+        ip = sh < 64 ? mant >> sh : 0;
+        lo = sh < 64 ? mant & ((1ull << sh) - 1u) : mant;
+    }
+    for (i = 0; i <= prec; i++) {                     /* prec decimals, and one to round with */
+        uint64_t l0 = (lo & 0xFFFFFFFFu) * 10u, l1 = (lo >> 32) * 10u + (l0 >> 32);
+        lo = (l1 << 32) | (l0 & 0xFFFFFFFFu);         /* rem *= 10 */
+        hi = hi * 10u + (l1 >> 32);
+        if (!sh) {
+            d[i] = 0;
+        } else if (sh >= 64) {
+            d[i] = (char)(hi >> (sh - 64));
+            hi &= (1ull << (sh - 64)) - 1u;
+        } else {
+            d[i] = (char)((hi << (64 - sh)) | (lo >> sh));
+            hi = 0;
+            lo &= (1ull << sh) - 1u;
+        }
+    }
+    up = d[prec] > 5 || (d[prec] == 5 && (hi || lo || (prec ? d[prec - 1] : (char)ip) & 1));
+    if (up) {
+        for (i = prec - 1; i >= 0 && ++d[i] == 10; i--)
+            d[i] = 0;
+        if (i < 0)
+            ip++;
+    }
+    i = 0;
+    do ib[i++] = (char)('0' + ip % 10u); while (ip /= 10u);
+    while (i)
+        s[n++] = ib[--i];
+    if (trim)
+        while (prec > 0 && d[prec - 1] == 0)
+            prec--;
+    if (prec > 0) {
+        s[n++] = '.';
+        for (i = 0; i < prec; i++)
+            s[n++] = (char)('0' + d[i]);
+    }
+    return n;
+}
+
 int vsnprintf(char *buf, size_t size, const char *f, va_list ap)
 {
     out_t o = {buf, size ? size - 1u : 0u, 0};
     for (; *f; f++) {
-        char num[24], *e = num + sizeof num, *s;
+        char num[40], *e = num + sizeof num, *s;
         int left = 0, plus = 0, space = 0, width = 0, prec = -1, lng = 0, len;
         char pad = ' ';
         unsigned long long v;
@@ -161,10 +232,22 @@ int vsnprintf(char *buf, size_t size, const char *f, va_list ap)
                 ;
             put_field(&o, s, len, width, left, ' ');
             break;
-        case 'f': case 'F': case 'e': case 'E': case 'g': case 'G': case 'a': case 'A':
-            (void)va_arg(ap, double);  /* taken off the list, not converted */
-            put_field(&o, "?", 1, width, left, ' ');
+        case 'f': case 'F': case 'e': case 'E': case 'g': case 'G': case 'a': case 'A': {
+            union { double d; uint64_t u; } x;
+            int g = *f != 'f' && *f != 'F';
+            x.d = va_arg(ap, double);
+            len = fmt_double(num, x.u, prec < 0 ? 6 : prec > 9 ? 9 : prec, g);
+            s = num;
+            if (num[0] != '-' && (plus || space)) {   /* the sign the flags ask for */
+                for (s = num + len; s > num; s--)
+                    s[0] = s[-1];
+                num[0] = plus ? '+' : ' ';
+                len++;
+                s = num;
+            }
+            put_field(&o, s, len, width, left, pad);
             break;
+        }
         case '%':
             put(&o, '%');
             break;

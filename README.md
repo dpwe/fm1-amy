@@ -222,7 +222,7 @@ X0X_AMY=1 AMY_DIR=~/amy ./build.sh        # build/amy_fw/x0x-amy.fwsc
 The build checks the result as X0X's does and fails if anything is out of bounds:
 
 ```
-  ok    image 321660 B; RAM .data+.bss 81624 B of 98304; pool 332240 B of 344064
+  ok    image 322656 B; RAM .data+.bss 81624 B of 98304; pool 332240 B of 344064
 ```
 
 Without `X0X_AMY=1`, `./build.sh` still builds X0X's groovebox (into `build/`), since this tree
@@ -294,7 +294,7 @@ a 336 KB pool for large buffers.
 
 | | fm1-amy | X0X, for comparison |
 |---|---|---|
-| Firmware image | 322 KB | 480 KB |
+| Firmware image | 323 KB | 480 KB |
 | Program data (RAM) | 82 KB | 98 KB |
 | Pool (fm1-amy: AMY's 256 KB heap, the screen's 69 KB canvas, backup buffers) | 332 KB | 336 KB |
 
@@ -309,10 +309,13 @@ allocation ever failed, AMY leaves it off rather than stopping.
 
 **The C library.** JieLi's toolchain comes with a reduced C library that has neither `malloc`
 nor `printf`. `firmware/src/app/amy_libc.c` provides them for the FM-1: a simple allocator over
-the heap in the pool, and an integer-only `printf` family (AMY prints floating-point numbers only
-in diagnostics, which the FM-1 doesn't show). The FM-1's FPU is single precision, and X0X's build
-fails if any double-precision arithmetic is linked; the fm1-amy build allows only AMY's float to
-double conversions, which happen in diagnostics and when a patch loads, never per sample.
+the heap in the pool, and a `printf` family. AMY needs its floats: it turns each MIDI note and
+mapped CC into a wire message with the value written as `%.3f`. A float argument arrives as a
+double, and the FM-1's FPU is single precision, so `printf` turns the double's bits into digits with
+integer arithmetic, exactly as the C library would (checked against the Mac's on 800,000 values).
+X0X's build fails if any double-precision arithmetic is linked; the fm1-amy build allows only AMY's
+float to double conversions, which happen in diagnostics, when a patch loads and once per MIDI
+note or mapped CC, never per sample.
 
 **CPU.** Measured in the simulator (instructions per sample on a Mac: a comparison, not an FM-1
 figure), six held voices take about 940, against about 1,150 for X0X playing its demo pattern,
