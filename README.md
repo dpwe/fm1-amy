@@ -205,9 +205,10 @@ a pi32v2 CPU). [BUILDING.md](BUILDING.md) has the details; in short, on a Mac yo
   ```
   If gitee.com can't be reached from your network, a GitHub mirror of the same tag works: the
   build checks the three files against their SHA-256 hashes.
-- **AMY**: a checkout of [shorepine/amy](https://github.com/shorepine/amy), unmodified. fm1-amy
-  was developed against AMY 1.2.200 and the current build is tested with AMY 1.2.204
-  (commit `ca31391d`).
+- **AMY**: a checkout of [shorepine/amy](https://github.com/shorepine/amy), unmodified, at
+  1.2.207 or later: the build uses AMY's options for leaving out its samples and all but one patch
+  (shorepine/amy#1250), and refuses an older AMY. The current build is tested with AMY 1.2.207
+  (commit `17ac9f9e`).
   ```bash
   git clone https://github.com/shorepine/amy.git ~/amy
   ```
@@ -222,7 +223,7 @@ X0X_AMY=1 AMY_DIR=~/amy ./build.sh        # build/amy_fw/x0x-amy.fwsc
 The build checks the result as X0X's does and fails if anything is out of bounds:
 
 ```
-  ok    image 322656 B; RAM .data+.bss 81624 B of 98304; pool 332240 B of 344064
+  ok    image 317536 B; RAM .data+.bss 81624 B of 98304; pool 332240 B of 344064
 ```
 
 Without `X0X_AMY=1`, `./build.sh` still builds X0X's groovebox (into `build/`), since this tree
@@ -294,13 +295,13 @@ a 336 KB pool for large buffers.
 
 | | fm1-amy | X0X, for comparison |
 |---|---|---|
-| Firmware image | 323 KB | 480 KB |
+| Firmware image | 318 KB | 480 KB |
 | Program data (RAM) | 82 KB | 98 KB |
 | Pool (fm1-amy: AMY's 256 KB heap, the screen's 69 KB canvas, backup buffers) | 332 KB | 336 KB |
 
-To fit, `tools/prep_amy_src.py` copies AMY's sources into the build tree with only patch 257 (the
-Juno presets come from the snapshot; no DX7 patches) and without AMY's built-in drum samples.
-AMY itself is not modified. AMY needs about 120 KB of heap with six voices and chorus (measured
+To fit, the build compiles AMY with two of its options: `AMY_ONLY_PATCH=257` keeps only patch 257
+(the Juno presets come from the snapshot; no DX7 patches), and `AMY_NO_BUILTIN_PCM` leaves out
+AMY's built-in drum samples. The simulator and the browser emulator build AMY the same way. AMY needs about 120 KB of heap with six voices and chorus (measured
 with AMY's own six-oscillator Juno voices; patch 257's four need less), and the reverb adds 138 KB when
 its level is first raised (measured on a Mac; the delay lines are the same size on the FM-1).
 Echo would add another 98 KB (for delays up to 185 ms) to 295 KB (AMY's default 743 ms maximum),
@@ -309,13 +310,11 @@ allocation ever failed, AMY leaves it off rather than stopping.
 
 **The C library.** JieLi's toolchain comes with a reduced C library that has neither `malloc`
 nor `printf`. `firmware/src/app/amy_libc.c` provides them for the FM-1: a simple allocator over
-the heap in the pool, and a `printf` family. AMY needs its floats: it turns each MIDI note and
-mapped CC into a wire message with the value written as `%.3f`. A float argument arrives as a
-double, and the FM-1's FPU is single precision, so `printf` turns the double's bits into digits with
-integer arithmetic, exactly as the C library would (checked against the Mac's on 800,000 values).
-X0X's build fails if any double-precision arithmetic is linked; the fm1-amy build allows only AMY's
-float to double conversions, which happen in diagnostics, when a patch loads and once per MIDI
-note or mapped CC, never per sample.
+the heap in the pool, and a `printf` family for integers and strings (a float prints `?`). AMY
+formats its own floats without `printf` or double precision (shorepine/amy#1246), and leaves its
+float-printing debug dumps out unless built with `AMY_DEBUG` (shorepine/amy#1248). The FM-1's FPU
+is single precision, and the build fails if any double-precision routine is linked: that would
+also catch a float passed to `printf`, which arrives as a double.
 
 **CPU.** Measured in the simulator (instructions per sample on a Mac: a comparison, not an FM-1
 figure), six held voices take about 940, against about 1,150 for X0X playing its demo pattern,
@@ -329,8 +328,6 @@ itself hasn't been measured yet.
 - Send the FM-1's knobs out as MIDI, so the editor's knobs follow the FM-1 too.
 - Show the audio load, and use the FM-1's second core.
 - Bring back the DX7 patches, loaded as the editor loads them, if they can be made to fit.
-- In AMY: build options for leaving out patch banks and samples, and single-precision constants
-  throughout, so neither the trimming step nor the build-check exception is needed.
 
 ## Credits
 

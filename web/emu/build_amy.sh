@@ -10,6 +10,9 @@
 set -e
 cd "$(dirname "$0")/../.."
 [ -n "${AMY_DIR:-}" ] && [ -f "$AMY_DIR/src/amy.h" ] || { echo "build_amy.sh: set AMY_DIR to an amy checkout"; exit 1; }
+grep -q AMY_ONLY_PATCH "$AMY_DIR/src/patches.c" || { echo "build_amy.sh: $AMY_DIR needs shorepine/amy#1250 or later"; exit 1; }
+# as the device builds it (tools/build.py AMY_TRIM): no built-in samples, patch 257 only
+AMY_TRIM="-DAMY_NO_BUILTIN_PCM -DAMY_ONLY_PATCH=257"
 O=build/emu_amy/obj
 mkdir -p build/gen "$O"
 [ -f build/gen/felucca_font.h ] || python3 tools/gen_font.py build/gen/felucca_font.h >/dev/null
@@ -20,7 +23,7 @@ python3 tools/gen_amy_juno.py tools/amy_k257.json build/gen/amy_juno.h
 AMY_SRC="algorithms amy envelope examples parse filters oscillators pcm interp_partials custom delay
          log2_exp2 patches transfer sequencer instrument amy_midi api midi_mappings cv_trigger note_output"
 for f in $AMY_SRC; do
-    emcc -O2 -ffp-contract=off -w -U__EMSCRIPTEN__ -DAMY_NO_MINIAUDIO -DAMY_WAVETABLE -I"$AMY_DIR/src" \
+    emcc -O2 -ffp-contract=off -w -U__EMSCRIPTEN__ -DAMY_NO_MINIAUDIO $AMY_TRIM -I"$AMY_DIR/src" \
         -c "$AMY_DIR/src/$f.c" -o "$O/$f.o"
 done
 D="-DX0X_AMY -DX0X_AMY_PATCH=${X0X_AMY_PATCH:-0} -DX0X_AMY_VOLUME=${X0X_AMY_VOLUME:-2}"

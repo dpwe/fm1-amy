@@ -118,7 +118,6 @@ int engine_amy_sounding(void) { return sounding; }
  * yield_synth_events, and turns the events into the knob values as the editor's own readback does
  * (amy_parameters.js set_knobs_from_events): what an event leaves unset reads as AMY's default.
  * The main loop takes the reading through a double buffer (engine_amy_readback). */
-void *yield_synth_events(uint8_t instr_num, struct amy_event *event, bool include_fx, void *state);   /* patches.c */
 enum { RB_OSCA = 0, RB_OSCB = 4, RB_LFO = 8, RB_VCF = 12, RB_FENV = 16, RB_ADSR = 20, RB_EQ = 24, RB_CHORUS = 27,
        RB_REVERB = 30, RB_ECHO = 33, RB_DIST = 36 };   /* amy_juno.h's order: each page's first knob */
 #define RB_BLOCKS 4u                   /* ~23 ms: a burst of the editor's messages makes one reading */

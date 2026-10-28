@@ -44,11 +44,15 @@ FPU = ["-mcpu=r3", "-mfprev1", "-ffp-contract=off"]
 O2_UNITS = ["dsp/drum909.c", "dsp/drum808.c", "dsp/bass303.c", "dsp/breaks.c", "dsp/fxbus.c", "dsp/master.c",
             "seq/sequencer.c", "seq/tb3po.c", "seq/pattern.c", "seq/motion.c", "app/engine.c"]
 # X0X_AMY=1 (with AMY_DIR): AMY (github.com/shorepine/amy) in place of X0X's engines, ui_amy.c on the
-# screen; AMY's sources are copied to build/amy/src by tools/prep_amy_src.py (Juno patches, no PCM), and
+# screen; AMY's sources are copied to build/amy/src by tools/prep_amy_src.py and built without its
+# samples or other patches (AMY_TRIM), and
 # the app links the toolchain's newlib (libc, libm) and compiler-rt, which X0X itself does without.
 # Its app and package go to build/amy_fw/, so the X0X build in build/ stays as it is.
 AMY = os.environ.get("X0X_AMY") == "1"
 AMY_SRC = OUT / "amy" / "src"
+# AMY's build options for the 568 KB app slot: no built-in PCM samples, and only patch 257 (AMYboard's
+# default, which the FM-1 loads its Juno presets onto); host/build_host_amy.sh and web/emu/build_amy.sh match
+AMY_TRIM = ["-DAMY_NO_BUILTIN_PCM", "-DAMY_ONLY_PATCH=257"]
 AMY_UNITS = ["algorithms", "amy", "envelope", "examples", "parse", "filters", "oscillators", "pcm", "interp_partials",
              "custom", "delay", "log2_exp2", "patches", "transfer", "sequencer", "instrument", "amy_midi", "api",
              "midi_mappings", "cv_trigger", "note_output"]
@@ -264,7 +268,7 @@ def build_app():
         units.append(("cc", *o2, "-c", FW / "src" / u, "-o", o))
         objs.append(o)
     if AMY:
-        amy_o2 = [*o2, "-Ibuild/amy/src", "-DAMY_NO_MINIAUDIO", "-w"]
+        amy_o2 = [*o2, "-Ibuild/amy/src", "-DAMY_NO_MINIAUDIO", *AMY_TRIM, "-w"]
         for u in AMY_UNITS:
             o = OUT / "o2" / f"amy_{u}.o"
             units.append(("cc", *amy_o2, "-c", AMY_SRC / f"{u}.c", "-o", o))
@@ -338,9 +342,6 @@ def check(img, syms, dis, rt):
         errors.append(f"image {len(img)} B exceeds the app slot")
     # X0X: the FPU is single precision; a soft-double routine in the image means a double crept in
     soft = sorted(set(re.findall(r"\s(__(?:add|sub|mul|div|neg|cmp|eq|ne|lt|le|gt|ge|un|extendsf|truncdf|fixdf|fixunsdf|floatsidf|floatunsidf|floatdidf)\w*df\w*)$", syms, re.M)))
-    if AMY and "__extendsfdf2" in soft:  # AMY's float -> double promotions: diagnostics and per-message code
-        soft.remove("__extendsfdf2")    # (fprintf of a float, EQ's "/ 20.0"), never per sample; arithmetic still fails
-        notes.append("AMY: __extendsfdf2 only (float -> double in AMY's diagnostics and message handling)")
     if soft:
         errors.append(f"soft-double routines linked: {soft[:6]} (a double in the code)")
     else:

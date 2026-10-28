@@ -8,13 +8,16 @@ set -e
 cd "$(dirname "$0")/.."
 CC="${CC:-cc}"
 [ -n "${AMY_DIR:-}" ] && [ -f "$AMY_DIR/src/amy.h" ] || { echo "build_host_amy.sh: set AMY_DIR to an amy checkout"; exit 1; }
+grep -q AMY_ONLY_PATCH "$AMY_DIR/src/patches.c" || { echo "build_host_amy.sh: $AMY_DIR needs shorepine/amy#1250 or later"; exit 1; }
+# as the device builds it (tools/build.py AMY_TRIM): no built-in samples, patch 257 only
+AMY_TRIM="-DAMY_NO_BUILTIN_PCM -DAMY_ONLY_PATCH=257"
 O=build/host/amy
 mkdir -p "$O" build/gen
 python3 tools/gen_amy_juno.py tools/amy_k257.json build/gen/amy_juno.h
 AMY_SRC="algorithms amy envelope examples parse filters oscillators pcm interp_partials custom delay
          log2_exp2 patches transfer sequencer instrument amy_midi api midi_mappings cv_trigger note_output"
 for f in $AMY_SRC; do
-    $CC -O2 -ffp-contract=off -w -DAMY_WAVETABLE -I"$AMY_DIR/src" -c "$AMY_DIR/src/$f.c" -o "$O/$f.o"
+    $CC -O2 -ffp-contract=off -w $AMY_TRIM -I"$AMY_DIR/src" -c "$AMY_DIR/src/$f.c" -o "$O/$f.o"
 done
 $CC -O2 -ffp-contract=off -std=gnu99 -Wall -Wextra -Wno-unused-parameter -DX0X_HOST -DX0X_AMY ${X0X_AMY_DEFS:-} \
     -DX0X_AMY_PATCH="${X0X_AMY_PATCH:-0}" -DX0X_AMY_VOLUME="${X0X_AMY_VOLUME:-2}" -Ifirmware/src -Ifirmware/src/dsp -Ibuild/gen -I"$AMY_DIR/src" \
