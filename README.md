@@ -100,8 +100,9 @@ What it doesn't do (yet):
 
 ## MIDI and the AMYboard editor
 
-Over USB the FM-1 is a class-compliant MIDI device, "X0X FM-1" (the name comes from X0X); no
-driver is needed. MIDI channel 1 plays the synth, with note velocity, pitch bend and the sustain
+Over USB the FM-1 is a class-compliant MIDI device, "AMY FM-1"; no driver is needed. (A Mac that
+has met the FM-1 under another name, such as "X0X FM-1", may keep showing that name until the
+device is deleted in Audio MIDI Setup.) MIDI channel 1 plays the synth, with note velocity, pitch bend and the sustain
 pedal (CC 64), so a keyboard or a DAW can play it. Its controllers are AMYboard's, from patch
 257's MIDI mappings: CC 7 level, 74 filter freq, 71 resonance, 76 LFO freq, 77 LFO osc depth,
 93 chorus level, 73 / 75 / 79 / 72 attack / decay / sustain / release, and 91 reverb level
@@ -113,7 +114,7 @@ MIDI SysEx; fm1-amy understands enough of that conversation for the editor's syn
 
 1. Open the editor in Chrome or Edge (they have Web MIDI) and choose **control** mode, allowing
    MIDI with SysEx when the browser asks.
-2. In the MIDI port settings, choose **X0X FM-1** as both the input and the output. The editor
+2. In the MIDI port settings, choose **AMY FM-1** as both the input and the output. The editor
    picks ports named "AMYboard" by itself, so choose the FM-1 by hand; its warning about the port
    names can be dismissed.
 3. The editor's knobs and patch choices for channel 1 now change the FM-1's sound, and its
@@ -145,21 +146,27 @@ with `X0X_AMY_KEYS_OUT=1`.
 
 ## Installing
 
-There is no ready-made firmware file yet: [build it](#building) first, which gives
-`build/amy_fw/x0x-amy.fwsc`. Then, with the FM-1 plugged in by USB and switched on:
+Download the firmware file, `fm1-amy-<version>.fwsc`, from the
+[releases](https://github.com/dpwe/fm1-amy/releases) (or [build it](#building)). Then, with the FM-1
+plugged in by USB and switched on:
 
 ```bash
 pip3 install mido python-rtmidi
-python3 tools/fm1_install.py --info                       # check the FM-1 is found, and what it runs
-python3 tools/fm1_install.py build/amy_fw/x0x-amy.fwsc    # install
+python3 tools/fm1_install.py --info                     # check the FM-1 is found, and what it runs
+python3 tools/fm1_install.py fm1-amy-0.1.0.fwsc         # install
 ```
 
 The installer reads the package and starts the FM-1's update loader, which writes the firmware,
-restarts the FM-1 and checks what it runs afterwards. It works from M-VAVE's own firmware
-(it was first installed over M-VAVE's V15, which identifies as `FM-1_015`) and from X0X.
-Don't unplug the FM-1 or switch it off while it writes. Afterwards the FM-1
-reports `FM-1_900`, the identity of a development build, and its USB MIDI port is named
-"X0X FM-1".
+restarts the FM-1 and checks what it runs afterwards. It installs over M-VAVE's own firmware (V15,
+which identifies as `FM-1_015`) and over X0X, and X0X's installer takes the FM-1 back from
+fm1-amy. Don't unplug the FM-1 or switch it off while it writes. Afterwards the FM-1 identifies
+as `FM-1_269` followed by the version (`FM-1_269000100` for 0.1.0; a development build is plain
+`FM-1_269`), and its USB MIDI port is named "AMY FM-1". The version is also at the right of the
+screen's header.
+
+FM-1s sold since autumn 2026 have a different flash chip (a UC25HQ80 instead of the Puya P25Q80);
+fm1-amy accepts both, so it can save on either. It has only been tried on an FM-1 with the
+older chip.
 
 To go back to X0X, install its firmware from [X0X's web installer](https://charlesvestal.github.io/fm1-x0x/install/),
 which can also put M-VAVE's firmware back.
@@ -207,8 +214,8 @@ a pi32v2 CPU). [BUILDING.md](BUILDING.md) has the details; in short, on a Mac yo
   build checks the three files against their SHA-256 hashes.
 - **AMY**: a checkout of [shorepine/amy](https://github.com/shorepine/amy), unmodified, at
   1.2.207 or later: the build uses AMY's options for leaving out its samples and all but one patch
-  (shorepine/amy#1250), and refuses an older AMY. The current build is tested with AMY 1.2.207
-  (commit `17ac9f9e`).
+  (shorepine/amy#1250), and refuses an older AMY. Release 0.1.0 is built and tested with AMY's
+  `main` at commit `3f002511` (1.2.209 and four commits).
   ```bash
   git clone https://github.com/shorepine/amy.git ~/amy
   ```
@@ -216,14 +223,15 @@ a pi32v2 CPU). [BUILDING.md](BUILDING.md) has the details; in short, on a Mac yo
 Then build:
 
 ```bash
-X0X_AMY=1 AMY_DIR=~/amy ./build.sh        # build/amy_fw/x0x-amy.fwsc
+X0X_AMY=1 AMY_DIR=~/amy ./build.sh                    # build/amy_fw/x0x-amy.fwsc (identity FM-1_269)
+X0X_AMY=1 AMY_DIR=~/amy ./build.sh --release 0.1.0    # build/amy_fw/fm1-amy-0.1.0.fwsc (FM-1_269000100)
 ```
 
 `X0X_AMY_PATCH=N` chooses the preset at power-on (0 to 127, default 0 = A11 Brass Set 1).
 The build checks the result as X0X's does and fails if anything is out of bounds:
 
 ```
-  ok    image 317536 B; RAM .data+.bss 81624 B of 98304; pool 332240 B of 344064
+  ok    image 317988 B; RAM .data+.bss 81624 B of 98304; pool 332240 B of 344064
 ```
 
 Without `X0X_AMY=1`, `./build.sh` still builds X0X's groovebox (into `build/`), since this tree

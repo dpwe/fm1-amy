@@ -207,12 +207,16 @@ static const uint8_t STR0[4] = {4, 3, 0x09, 0x04};
 #ifdef FELUCCA_LOADER
 static const uint8_t STR1[] = {42, 3, 'H', 0, 0xFC, 0, 'g', 0, 'e', 0, 'l', 0, 't', 0, 'o', 0, 'n', 0, ' ', 0, 'I', 0,
                                'n', 0, 's', 0, 't', 0, 'r', 0, 'u', 0, 'm', 0, 'e', 0, 'n', 0, 't', 0, 's', 0};
+#elif defined(X0X_AMY)
+static const uint8_t STR1[] = {8, 3, 'A', 0, 'M', 0, 'Y', 0};          /* fm1-amy: manufacturer */
 #else
 static const uint8_t STR1[] = {8, 3, 'X', 0, '0', 0, 'X', 0};          /* X0X: manufacturer */
 #endif
 #ifdef FELUCCA_LOADER
 static const uint8_t STR2[] = {30, 3, 'F', 0, 'e', 0, 'l', 0, 'u', 0, 'c', 0, 'c', 0, 'a', 0, ' ', 0, 'U', 0, 'p', 0,
                                'd', 0, 'a', 0, 't', 0, 'e', 0};
+#elif defined(X0X_AMY)
+static const uint8_t STR2[] = {18, 3, 'A', 0, 'M', 0, 'Y', 0, ' ', 0, 'F', 0, 'M', 0, '-', 0, '1', 0};   /* fm1-amy */
 #else
 static const uint8_t STR2[] = {18, 3, 'X', 0, '0', 0, 'X', 0, ' ', 0, 'F', 0, 'M', 0, '-', 0, '1', 0};   /* X0X */
 #endif

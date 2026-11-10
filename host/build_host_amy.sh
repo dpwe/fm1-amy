@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: GPL-3.0-only
 # Build the X0X_AMY host simulator: the whole app with AMY (github.com/shorepine/amy) making the
 # sound instead of X0X's engines (firmware/src/app/engine_amy.c), into build/host/x0x_amy_host.
-#   AMY_DIR=/path/to/amy [X0X_AMY_PATCH=0] [X0X_AMY_VOLUME=2] [X0X_AMY_DEFS=-DX0X_AMY_LOG=1] host/build_host_amy.sh
+#   AMY_DIR=/path/to/amy [X0X_AMY_PATCH=0] [X0X_AMY_VOLUME=2] [X0X_AMY_DEFS=-DX0X_AMY_LOG=1] [X0X_VERSION=0.1.0] \
+#       host/build_host_amy.sh
 # AMY's sources build with their own flags into build/host/amy/; the rest is host/build_host.sh.
 set -e
 cd "$(dirname "$0")/.."
@@ -24,5 +25,5 @@ $CC -O2 -ffp-contract=off -std=gnu99 -Wall -Wextra -Wno-unused-parameter -DX0X_H
     -c firmware/src/app/engine_amy.c -o "$O/engine_amy.o"
 # engine_amy.c in place of engine.c and the DSP units (see engine.h)
 X0X_HOST_UNITS="firmware/src/seq/sequencer.c firmware/src/seq/tb3po.c firmware/src/seq/pattern.c firmware/src/seq/motion.c" \
-    X0X_HOST_DEFS="-DX0X_AMY -DX0X_AMY_PATCH=${X0X_AMY_PATCH:-0} $O/*.o" X0X_HOST_OUT=build/host/x0x_amy_host sh host/build_host.sh >/dev/null
+    X0X_HOST_DEFS="-DX0X_AMY -DX0X_AMY_PATCH=${X0X_AMY_PATCH:-0} ${X0X_VERSION:+-DX0X_VERSION=\"$X0X_VERSION\"} $O/*.o" X0X_HOST_OUT=build/host/x0x_amy_host sh host/build_host.sh >/dev/null
 echo "host: build/host/x0x_amy_host (AMY $(git -C "$AMY_DIR" describe --tags --always 2>/dev/null || echo '?'), patch ${X0X_AMY_PATCH:-0})"

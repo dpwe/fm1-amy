@@ -6,6 +6,10 @@
 extern uint32_t _data_start[], _data_end[], _data_load[], _bss_start[], _bss_end[];
 extern uint32_t _pool_start[], _pool_end[], _rt_start[], _rt_end[], _rt_load[], _c1_start[], _c1_end[], _c1_load[];
 
+/* the FM-1's flash: the Puya P25Q80 (0x856014), or on units sold since autumn 2026 the UC25HQ80
+ * (0xB36014), both 1 MiB with the same SPI NOR commands (thefirmwarehub.com/submit) */
+#define FL_JEDEC_OK(id) ((id) == 0x856014u || (id) == 0xB36014u)
+
 /* --------------------------------------------------------------- audio --- */
 /* X0X: 512-frame halves (11.6 ms; Felucca 256). The render runs inside the DMA's deadline, and a
  * busy pattern averaging ~80 % ran over it about one half in 300 (a heavy step): a dropped half.
@@ -390,7 +394,7 @@ static void fm1_main(void)
         fm1_sysvdd_raise(15);                       /* 1.60 V, then 1.38 V (fm1_sys.h) */
         plat_vdc14_level = (uint8_t)fm1_vdc14();
         plat_sysvdd_level = (uint8_t)fm1_sysvdd();
-        flash_ok = FL_FAR(fl_jedec_ram)() == 0x856014u;   /* the expected 1 MiB part, else RAM only */
+        flash_ok = FL_JEDEC_OK(FL_FAR(fl_jedec_ram)());   /* a known 1 MiB part, else RAM only */
         irq_restore(f);
         if (flash_ok) {
             rs_boot();                              /* a restore's commit cut short by a power loss: finished */

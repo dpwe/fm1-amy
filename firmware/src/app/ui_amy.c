@@ -258,6 +258,7 @@ static void amy_draw(void)
         cv_text(x + 8, 30, &FONT_S, sp ? sp + 1 : name, C_HI);
         sprintf(b, "%d / %d", am.patch + 1, AMY_NJUNO);
         cv_text(8, 52, &FONT_T, b, C_DIM);
+        text_r(232, 52, &FONT_T, "FM1-AMY " X0X_VERSION, C_DIM);   /* tools/build.py --release */
         cv_rect(0, 71, 240, 1, C_LINE);
         cv_blit(0, 0);
     }

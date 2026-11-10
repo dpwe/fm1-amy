@@ -430,7 +430,11 @@ def main():
         if not os.environ.get("AMY_DIR"):
             raise SystemExit("X0X_AMY=1 needs AMY_DIR (an amy checkout)")
         OUT = SRC / "build" / "amy_fw"
-        name = name.replace("x0x", "x0x-amy")
+        # fm1-amy's own identity: FM-1_269 (A-M-Y on a phone's keys; free on thefirmwarehub.com),
+        # releases FM-1_269 + major, minor, patch as two digits each (0.1.0 -> FM-1_269000100)
+        PRODUCT = "FM-1_269" + PRODUCT[len("FM-1_9"):] if a.release else "FM-1_269"
+        VERSION = a.release.upper() if a.release else None   # as given: the hub tags 0.x releases beta
+        name = f"fm1-amy-{a.release}.fwsc" if a.release else "x0x-amy.fwsc"
     OUT.mkdir(parents=True, exist_ok=True)
     with ThreadPoolExecutor(2) as ex:
         gen, ldr = ex.submit(generate), ex.submit(build_loader)

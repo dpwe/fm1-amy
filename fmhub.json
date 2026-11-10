@@ -1,0 +1,10 @@
+{
+  "what": "A six-voice analog-style synth: AMY's emulations of the 128 Juno-60 factory patches, shaped with the AMYboard editor's patch knobs (oscillators, LFO, filter, envelopes, EQ, chorus, reverb, distortion) on eleven colour-coded pages. Plays over USB MIDI, and the AMYboard editor can edit it live.",
+  "author": "Dan Ellis",
+  "kinds": [
+    "synth"
+  ],
+  "editor": "https://amyboard.com/editor",
+  "image": "docs/card.png",
+  "color": "#F0B4B4"
+}
