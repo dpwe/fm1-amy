@@ -368,3 +368,5 @@ terms as listed there.
 M-VAVE and FM-1 are trademarks of their owners; Juno-60 is a trademark of Roland Corporation,
 used here only to describe the patches AMY emulates. fm1-amy isn't affiliated with or endorsed
 by M-VAVE, Roland, Hügelton Instruments or the authors of X0X.
+
+You can also try fm1-amy in the browser, no flashing needed, in the free community [FM-1 Emulator](https://fm1-emulator.atst.tools/).
